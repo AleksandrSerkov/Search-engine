@@ -28,4 +28,3 @@ public class Page {
 
     // Constructors, getters, and setters
 }
-

@@ -12,7 +12,9 @@ import java.sql.Timestamp;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-
+import searchengine.model.SiteRepository;
+import searchengine.model.PageRepository;
+import searchengine.model.Page;
 @Service
 public class IndexingService {
     private final SiteRepository siteRepository;
@@ -72,7 +74,6 @@ public class IndexingService {
                 .get();
 
         Elements links = doc.select("a[href]");
-
         for (Element link : links) {
             String linkUrl = link.absUrl("href");
             if (isValidLink(linkUrl)) {
@@ -85,6 +86,7 @@ public class IndexingService {
 
                 // задержка перед следующим запросом
                 Thread.sleep((long) (500 + Math.random() * 4500));
+                uniqueLinks.add(linkUrl); // Добавить ссылку в uniqueLinks
             }
         }
 
@@ -102,10 +104,9 @@ public class IndexingService {
         }
     }
 
-
     private boolean isValidLink(String linkUrl) {
         // Дополнительная проверка ссылки, если необходимо
-        return true;
+        return linkUrl.contains("example.com");
     }
 
     private Page createNewPageEntry(Site site, String url) {
