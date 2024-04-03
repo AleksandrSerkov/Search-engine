@@ -9,24 +9,40 @@ import searchengine.model.*;
 import java.io.IOException;
 import java.sql.Timestamp;
 
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
+
 import searchengine.model.SiteRepository;
 import searchengine.model.PageRepository;
 import searchengine.model.Page;
+
 @Service
 public class IndexingService {
     private final SiteRepository siteRepository;
     private final PageRepository pageRepository;
+    private final LemmaRepository lemmaRepository;
+    private final IndexRepository indexRepository;
 
-
-    public IndexingService(SiteRepository siteRepository, PageRepository pageRepository) {
+    public IndexingService(SiteRepository siteRepository, PageRepository pageRepository, LemmaRepository lemmaRepository, IndexRepository indexRepository) {
         this.siteRepository = siteRepository;
-
         this.pageRepository = pageRepository;
+        this.lemmaRepository = lemmaRepository;
+        this.indexRepository = indexRepository;
+
+    }// Метод для индексирования страницы
+
+
+
+
+
+    // Метод для очистки HTML-тегов
+    public String cleanHtmlTags(String htmlContent) {
+        Document doc = Jsoup.parse(htmlContent);
+        String text = doc.text();
+        return text;
     }
 
+    // Этот метод начинает процесс индексации указанного сайта.
+   // Алгоритм включает в себя поиск и сохранение информации с сайта в базу данных.
     public void startIndexing(List<Site> siteConfigs) {
         for (Site siteConfig : siteConfigs) {
             try {
@@ -52,10 +68,9 @@ public class IndexingService {
 
     //Обработка страницы
     public void processSitePages(Site site, String url) throws IOException, InterruptedException {
-        // Обработка страницы
-        // TODO: Добавьте код для обработки страницы и сохранения в базу данных
 
-        //Пример кода сохранения страницы в базу данных
+
+        //сохранения страницы в базу данных
         Page page = new Page();
         page.setSite(site);
         page.setPath("/PlayBack.Ru");
@@ -105,7 +120,7 @@ public class IndexingService {
     }
 
     private boolean isValidLink(String linkUrl) {
-        // Дополнительная проверка ссылки, если необходимо
+
         return linkUrl.contains("example.com");
     }
 
@@ -113,7 +128,7 @@ public class IndexingService {
         Page page = new Page();
         page.setSite(site);
         page.setPath(url);
-        page.setCode(200); // Здесь можно обработать код ответа сервера, если это необходимо
+        page.setCode(200);
         return pageRepository.save(page);
     }
 

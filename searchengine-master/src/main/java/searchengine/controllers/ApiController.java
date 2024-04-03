@@ -1,8 +1,6 @@
 package searchengine.controllers;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 import searchengine.config.Site;
 import searchengine.config.SitesList;
 import searchengine.dto.statistics.StatisticsResponse;
@@ -14,6 +12,7 @@ import searchengine.services.IndexingService;
 import searchengine.services.SiteService;
 import searchengine.services.StatisticsService;
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api")
@@ -29,6 +28,20 @@ public class ApiController {
         this.indexingService = indexingService;
         this.sitesList = sitesList;
         this.siteRepository = siteRepository;
+    }
+    @PostMapping("/indexPage")
+    public ResponseEntity<?> indexPage(@RequestParam String url) {
+        if (!isValidUrl(url)) {
+            return ResponseEntity.badRequest().body(Map.of("result", false, "error", "Неверный адрес страницы"));
+        }
+
+        // Логика добавления или обновления страницы в индексе
+
+        return ResponseEntity.ok(Map.of("result", true));
+    }
+
+    private boolean isValidUrl(String url) {
+        return url.startsWith("http://") || url.startsWith("https://");
     }
 
     @GetMapping("/statistics")
@@ -46,7 +59,6 @@ public class ApiController {
 
         return ResponseEntity.ok("Индексация успешно запущена");
     }
-
 
     @GetMapping("/stopIndexing")
     public ResponseEntity<?> stopIndexing() {

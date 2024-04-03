@@ -11,6 +11,7 @@
     <properties>
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
+
     </properties>
 
     <parent>
@@ -25,6 +26,19 @@
             <url>https://gitlab.skillbox.ru/api/v4/projects/263574/packages/maven</url>
         </repository>
     </repositories>
+
+    <distributionManagement>
+        <repository>
+            <id>skillbox-gitlab</id>
+            <url>https://gitlab.skillbox.ru/api/v4/projects/263574/packages/maven</url>
+        </repository>
+
+        <snapshotRepository>
+            <id>skillbox-gitlab</id>
+            <url>https://gitlab.skillbox.ru/api/v4/projects/263574/packages/maven</url>
+        </snapshotRepository>
+    </distributionManagement>
+
 
     <dependencies>
         <dependency>
