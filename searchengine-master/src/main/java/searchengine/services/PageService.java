@@ -20,11 +20,20 @@ public class PageService {
     private final IndexRepository indexRepository;
 
     @Autowired
-    public PageService(PageRepository pageRepository, LemmaRepository lemmaRepository, IndexRepository indexRepository,SiteRepository siteRepository) {
+    public PageService(PageRepository pageRepository, LemmaRepository lemmaRepository, IndexRepository indexRepository, SiteRepository siteRepository) {
         this.pageRepository = pageRepository;
         this.lemmaRepository = lemmaRepository;
         this.indexRepository = indexRepository;
         this.siteRepository = siteRepository;
+    }
+
+    private void checkCertificate(String url) {
+        try {
+            Document doc = Jsoup.connect(url).get();
+            // Дополнительные действия, если не нужно обрабатывать содержимое страницы
+        } catch (Exception e) {
+            e.printStackTrace(); // Обработка ошибки сертификата
+        }
     }
 
     // Сохранить объект page в базе данных
@@ -39,7 +48,10 @@ public class PageService {
 
     // Индексировать страницу по URL
     public void indexPage(String url) throws IOException {
-IndexingService indexingService = new IndexingService(siteRepository, pageRepository, lemmaRepository, indexRepository);
+        IndexingService indexingService = new IndexingService(siteRepository, pageRepository, lemmaRepository, indexRepository);
+
+        // Проверяем сертификат перед загрузкой страницы
+        checkCertificate(url);
 
         // Получение HTML-кода веб-страницы
         Document doc = Jsoup.connect(url).get();
@@ -63,26 +75,28 @@ IndexingService indexingService = new IndexingService(siteRepository, pageReposi
         }
 
         for (Map.Entry<String, Integer> entry : lemmaCount.entrySet()) {
-            String lemma = entry.getKey();
+            String lemmaText = entry.getKey();
             int rank = entry.getValue();
 
-            Lemma lemmaEntity = lemmaRepository.findByLemmaText(lemma);
+            Lemma lemmaEntity = lemmaRepository.findByLemmaText(lemmaText);
             if (lemmaEntity == null) {
                 Site site = siteRepository.findById(1L).orElseThrow(EntityNotFoundException::new);
                 lemmaEntity = new Lemma();
-                lemmaEntity.setLemmaText(lemma); // Фиксируем лемму в объекте Lemma
+                lemmaEntity.setLemmaText(lemmaText);
                 lemmaEntity.setSite(site);
-                lemmaRepository.save(lemmaEntity); // Сохраняем новую лемму в базе данных
+                lemmaEntity.setFrequency(1); // Устанавливаем начальное значение частоты
+            } else {
+                lemmaEntity.setFrequency(lemmaEntity.getFrequency() + 1); // Увеличиваем частоту леммы
             }
-
-            lemmaEntity.incrementFrequency();
             lemmaRepository.save(lemmaEntity);
 
-            Index index = new Index();
-            index.setLemma(String.valueOf(lemmaEntity));
-            index.setPageId(page.getId()); // Устанавливаем идентификатор страницы
-            index.setRank((float) rank);
-            indexRepository.save(index);
+            // Создаем связки леммы и страницы в таблице index
+            Index indexEntity = new Index();
+            indexEntity.setLemmaId(lemmaEntity.getId());
+            indexEntity.setPageId(page.getId());
+            indexEntity.setLemma(lemmaText);
+            indexEntity.setRank((float) rank);
+            indexRepository.save(indexEntity);
         }
     }
 }

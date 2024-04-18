@@ -23,11 +23,13 @@ public class ApiController {
     private final SitesList sitesList;
     private boolean isIndexingInProgress = false;
     private final SiteRepository siteRepository;
-    public ApiController(StatisticsService statisticsService, IndexingService indexingService, SitesList sitesList, SiteRepository siteRepository) {
+
+    public ApiController(StatisticsService statisticsService,  IndexingService indexingService, SitesList sitesList, SiteRepository siteRepository) {
         this.statisticsService = statisticsService;
         this.indexingService = indexingService;
         this.sitesList = sitesList;
         this.siteRepository = siteRepository;
+
     }
     @PostMapping("/indexPage")
     public ResponseEntity<?> indexPage(@RequestParam String url) {
@@ -55,9 +57,10 @@ public class ApiController {
             return ResponseEntity.badRequest().body("Индексация уже запущена");
         }
 
-        startIndexingService();
+        isIndexingInProgress = true;
+        indexingService.startIndexing(siteRepository.findAll());
 
-        return ResponseEntity.ok("Индексация успешно запущена");
+        return ResponseEntity.ok("Индексация запущена");
     }
 
     @GetMapping("/stopIndexing")

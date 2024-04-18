@@ -3,7 +3,7 @@ import jakarta.persistence.*;
 import lombok.Data;
 @Data
 @Entity
-@Table(name = "idx")
+@Table(name = "indx")
 public class Index {
 
     @Id

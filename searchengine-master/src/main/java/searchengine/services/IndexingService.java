@@ -40,22 +40,30 @@ public class IndexingService {
         String text = doc.text();
         return text;
     }
-
-    // Этот метод начинает процесс индексации указанного сайта.
-   // Алгоритм включает в себя поиск и сохранение информации с сайта в базу данных.
     public void startIndexing(List<Site> siteConfigs) {
+        // Создание экземпляра PageService с передачей репозиториев в конструктор
+        PageService pageService = new PageService(pageRepository, lemmaRepository, indexRepository, siteRepository);
+
         for (Site siteConfig : siteConfigs) {
             try {
                 Site site = createNewSiteEntry(siteConfig);
                 processSitePages(site, siteConfig.getUrl());
+
+                // Вызов метода indexPage у PageService
+                pageService.indexPage(siteConfig.getUrl());
+
                 updateSiteStatus(site, Status.INDEXED);
             } catch (Exception e) {
-                // Обработка ошибки и обновление статуса на FAILED
                 updateSiteStatus(siteConfig, Status.FAILED);
                 updateSiteLastError(siteConfig, e.getMessage());
             }
         }
     }
+
+
+
+
+
 
     private Site createNewSiteEntry(Site siteConfig) {
         Site site = new Site();
@@ -65,29 +73,35 @@ public class IndexingService {
         site.setStatusTime(new Timestamp(System.currentTimeMillis()));
         return siteRepository.save(site);
     }
-
-    //Обработка страницы
-    public void processSitePages(Site site, String url) throws IOException, InterruptedException {
-
-
-        //сохранения страницы в базу данных
+    public Page createNewPageEntry(Site site, String pageURL) {
+        // Создаем новую запись о странице
         Page page = new Page();
         page.setSite(site);
-        page.setPath("/PlayBack.Ru");
-        page.setCode(200);
-        page.setContent("<!DOCTYPE html><html><head><title>Инт...</html>");
-        // Проверка перед сохранением в базу данных
+        page.setPath(pageURL);
 
-        pageRepository.save(page);
+        // Сохраняем запись о странице в базу данных
+        return pageRepository.save(page);
+    }
 
-        Set<String> uniqueLinks = new HashSet<>();
-        String userAgent = "HeliontSearchBot";
-        String referrer = "http://www.google.com";
+
+    public void processSitePages(Site site, String url) throws IOException, InterruptedException {
+
+        // Получаем страницу с сайта
         Document doc = Jsoup.connect(url)
-                .userAgent(userAgent)
-                .referrer(referrer)
                 .get();
 
+        // Получаем HTML-код страницы
+        String content = doc.outerHtml();
+
+        // Сохраняем HTML-код страницы в базу данных
+        Page page = new Page();
+        page.setSite(site);
+        page.setPath(url); // Устанавливаем путь страницы
+        page.setCode(200); // Устанавливаем код ответа
+        page.setContent(content); // Устанавливаем содержимое страницы
+        pageRepository.save(page); // Сохраняем страницу
+
+        Set<String> uniqueLinks = new HashSet<>();
         Elements links = doc.select("a[href]");
         for (Element link : links) {
             String linkUrl = link.absUrl("href");
@@ -99,45 +113,44 @@ public class IndexingService {
                     // Обработка ошибки и пропуск страницы
                 }
 
-                // задержка перед следующим запросом
+                // Задержка перед следующим запросом
                 Thread.sleep((long) (500 + Math.random() * 4500));
                 uniqueLinks.add(linkUrl); // Добавить ссылку в uniqueLinks
             }
         }
+    }
+    public void processPageContent(Page page, String url) {
+        try {
+            // Получаем страницу с сайта
+            Document doc = Jsoup.connect(url).get();
 
-        for (String linkUrl : uniqueLinks) {
-            try {
-                Page newPage = createNewPageEntry(site, linkUrl);
-                processPageContent(newPage, linkUrl);
-                uniqueLinks.add(linkUrl);
-            } catch (Exception e) {
-                // Обработка ошибки и пропуск страницы
-            }
+            // Получаем текст страницы без тегов
+            String text = cleanHtmlTags(doc.html());
 
-            // задержка перед следующим запросом
-            Thread.sleep((long) (500 + Math.random() * 4500));
+            // Лемматизация текста страницы (код для лемматизации)
+
+            // Сохраняем леммы в базу данных
+            Lemma lemma = new Lemma();
+            lemma.setLemmaText("lemma_text");
+            lemma = lemmaRepository.save(lemma);
+
+            // Создаем индекс и заполняем информацией о лемме
+            Index index = new Index();
+            index.setPageId(page.getId());
+            index.setLemmaId(lemma.getId());
+            index.setLemma("lemma_text");
+            index.setRank(1.0f); // Пример значения для rank
+            indexRepository.save(index);
+
+        } catch (IOException e) {
+            System.out.println("Error while processing page content: " + e.getMessage());
         }
     }
 
-    private boolean isValidLink(String linkUrl) {
 
-        return linkUrl.contains("example.com");
-    }
 
-    private Page createNewPageEntry(Site site, String url) {
-        Page page = new Page();
-        page.setSite(site);
-        page.setPath(url);
-        page.setCode(200);
-        return pageRepository.save(page);
-    }
 
-    private void processPageContent(Page page, String url) throws IOException {
-        // Здесь можно обработать содержимое страницы, если это необходимо
-        String content = ""; // Пример пустого содержимого
-        page.setContent(content);
-        pageRepository.save(page);
-    }
+
 
     private void updateSiteStatus(Site site, Status status) {
         site.setStatus(status);
@@ -149,4 +162,23 @@ public class IndexingService {
         site.setLastError(error);
         siteRepository.save(site);
     }
+    private boolean isValidLink(String url) {
+        // Проверка наличия протокола http(s)
+        if(!url.startsWith("http://") && !url.startsWith("https://")) {
+            return false;
+        }
+
+        // Проверка формата домена
+        String domain = url.split("/")[2];
+        if(!domain.endsWith(".com") && !domain.endsWith(".net") && !domain.endsWith(".org") && !domain.endsWith(".ru")) {
+            return false;
+        }
+// Дополнительная проверка на наличие конечного слеша
+        if (url.endsWith("/")) {
+            return false; // В конце URL не должно быть слеша
+        }
+
+        return true; // Если все проверки пройдены успешно
+    }
+
 }

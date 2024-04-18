@@ -12,7 +12,7 @@ indexing-settings:
     - url: https://ipfran.ru/
       name: Ipfran.ru
 server:
-  port: 8080
+  port: 8081
 spring:
   datasource:
     username: root
