@@ -41,21 +41,33 @@ public class IndexingService {
         return text;
     }
     public void startIndexing(List<Site> siteConfigs) {
-        // Создание экземпляра PageService с передачей репозиториев в конструктор
         PageService pageService = new PageService(pageRepository, lemmaRepository, indexRepository, siteRepository);
 
         for (Site siteConfig : siteConfigs) {
+            Site site = null;
+
             try {
-                Site site = createNewSiteEntry(siteConfig);
-                processSitePages(site, siteConfig.getUrl());
+                site = createNewSiteEntry(siteConfig);
 
-                // Вызов метода indexPage у PageService
-                pageService.indexPage(siteConfig.getUrl());
+                if(site != null) {
+                    String url = site.getUrl();
+                    processSitePages(site, url);
 
-                updateSiteStatus(site, Status.INDEXED);
+                    pageService.indexPage(url); // передаем URL страницы, а не объект Site
+                    updateSiteStatus(site, Status.INDEXED);
+                } else {
+                    throw new Exception("Failed to create Site object");
+                }
+
             } catch (Exception e) {
-                updateSiteStatus(siteConfig, Status.FAILED);
-                updateSiteLastError(siteConfig, e.getMessage());
+                // Логируем ошибку
+                System.out.println("Error occurred: " + e.getMessage());
+                if(site != null) {
+                    updateSiteStatus(site, Status.FAILED);
+                    updateSiteLastError(site, e.getMessage());
+                } else {
+                    System.out.println("Site object is null, cannot update status or last error message");
+                }
             }
         }
     }
@@ -65,7 +77,18 @@ public class IndexingService {
 
 
 
+
+
+
+
+
+
+
     private Site createNewSiteEntry(Site siteConfig) {
+        if (siteConfig == null) {
+            return null; // Лучше обрабатывать ситуацию, когда siteConfig равен null
+        }
+
         Site site = new Site();
         site.setStatus(Status.INDEXING);
         site.setUrl(siteConfig.getUrl());
@@ -73,6 +96,7 @@ public class IndexingService {
         site.setStatusTime(new Timestamp(System.currentTimeMillis()));
         return siteRepository.save(site);
     }
+
     public Page createNewPageEntry(Site site, String pageURL) {
         // Создаем новую запись о странице
         Page page = new Page();
@@ -82,43 +106,56 @@ public class IndexingService {
         // Сохраняем запись о странице в базу данных
         return pageRepository.save(page);
     }
-
-
     public void processSitePages(Site site, String url) throws IOException, InterruptedException {
-
         // Получаем страницу с сайта
-        Document doc = Jsoup.connect(url)
-                .get();
+        Document doc = Jsoup.connect(url).get();
 
         // Получаем HTML-код страницы
         String content = doc.outerHtml();
 
-        // Сохраняем HTML-код страницы в базу данных
-        Page page = new Page();
-        page.setSite(site);
-        page.setPath(url); // Устанавливаем путь страницы
-        page.setCode(200); // Устанавливаем код ответа
-        page.setContent(content); // Устанавливаем содержимое страницы
-        pageRepository.save(page); // Сохраняем страницу
+        // Проверяем, что страница не равна null перед сохранением
+        if (content != null && !content.isEmpty()) {
+            // Создаем новую страницу
+            Page page = new Page();
+            page.setSite(site);
+            page.setPath(url);
+            page.setCode(200);
+            page.setContent(content);
 
-        Set<String> uniqueLinks = new HashSet<>();
-        Elements links = doc.select("a[href]");
-        for (Element link : links) {
-            String linkUrl = link.absUrl("href");
-            if (isValidLink(linkUrl)) {
-                try {
-                    Page newPage = createNewPageEntry(site, linkUrl);
-                    processPageContent(newPage, linkUrl);
-                } catch (Exception e) {
-                    // Обработка ошибки и пропуск страницы
+            // Сохраняем страницу в базу данных
+            pageRepository.save(page);
+
+            // Собираем уникальные ссылки с текущей страницы
+            Set<String> uniqueLinks = new HashSet<>();
+            Elements links = doc.select("a[href]");
+            for (Element link : links) {
+                String linkUrl = link.absUrl("href");
+
+                // Проверяем валидность ссылки и уникальность
+                if (isValidLink(linkUrl) && !uniqueLinks.contains(linkUrl)) {
+                    uniqueLinks.add(linkUrl); // Добавляем ссылку в сет уникальных ссылок
+
+                    try {
+                        // Создаем новую страницу и обрабатываем ее содержимое
+                        Page newPage = createNewPageEntry(site, linkUrl);
+                        processPageContent(newPage, linkUrl);
+
+                        // Добавляем случайную задержку перед следующим запросом
+                        Thread.sleep(500 + (long) (Math.random() * 4500));
+                    } catch (Exception e) {
+                        // Обрабатываем ошибку при обработке страницы
+                    }
                 }
-
-                // Задержка перед следующим запросом
-                Thread.sleep((long) (500 + Math.random() * 4500));
-                uniqueLinks.add(linkUrl); // Добавить ссылку в uniqueLinks
             }
+        } else {
+            // Обновляем информацию об ошибке, если HTML-код страницы равен null или пустой
+            updateSiteLastError(site, "Failed to retrieve HTML content for URL: " + url);
         }
     }
+
+
+
+
     public void processPageContent(Page page, String url) {
         try {
             // Получаем страницу с сайта
@@ -127,25 +164,35 @@ public class IndexingService {
             // Получаем текст страницы без тегов
             String text = cleanHtmlTags(doc.html());
 
-            // Лемматизация текста страницы (код для лемматизации)
+            // Лемматизация текста страницы
+            String[] tokens = text.split("\s+"); // Разделение текста на токены
+            List<String> lemmas = new ArrayList<>();
+
+            // Пример простой лемматизации: приведение всех слов к нижнему регистру
+            for (String token : tokens) {
+                lemmas.add(token.toLowerCase());
+            }
 
             // Сохраняем леммы в базу данных
-            Lemma lemma = new Lemma();
-            lemma.setLemmaText("lemma_text");
-            lemma = lemmaRepository.save(lemma);
+            for (String lemmaText : lemmas) {
+                Lemma lemma = new Lemma();
+                lemma.setLemmaText(lemmaText);
+                lemma = lemmaRepository.save(lemma);
 
-            // Создаем индекс и заполняем информацией о лемме
-            Index index = new Index();
-            index.setPageId(page.getId());
-            index.setLemmaId(lemma.getId());
-            index.setLemma("lemma_text");
-            index.setRank(1.0f); // Пример значения для rank
-            indexRepository.save(index);
+                // Создаем индекс и заполняем информацией о лемме
+                Index index = new Index();
+                index.setPageId(page.getId());
+                index.setLemmaId(lemma.getId());
+                index.setLemma(lemmaText);
+                index.setRank(1.0f); // Пример значения для rank
+                indexRepository.save(index);
+            }
 
         } catch (IOException e) {
             System.out.println("Error while processing page content: " + e.getMessage());
         }
     }
+
 
 
 

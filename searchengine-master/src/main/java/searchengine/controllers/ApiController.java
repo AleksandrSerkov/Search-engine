@@ -1,4 +1,5 @@
 package searchengine.controllers;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import searchengine.config.Site;
@@ -50,17 +51,23 @@ public class ApiController {
     public ResponseEntity<StatisticsResponse> statistics() {
         return ResponseEntity.ok(statisticsService.getStatistics());
     }
-
     @GetMapping("/startIndexing")
     public ResponseEntity<?> startIndexing() {
-        if (isIndexingInProgress) {
-            return ResponseEntity.badRequest().body("Индексация уже запущена");
+        synchronized (this) {
+            if (isIndexingInProgress) {
+                return ResponseEntity.badRequest().body("Индексация уже запущена");
+            }
+
+            isIndexingInProgress = true;
+
+            try {
+                indexingService.startIndexing(siteRepository.findAll());
+                return ResponseEntity.ok("Индексация запущена");
+            } catch (Exception e) {
+                isIndexingInProgress = false; // Сброс флага в случае ошибки
+                return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Произошла ошибка при запуске индексации");
+            }
         }
-
-        isIndexingInProgress = true;
-        indexingService.startIndexing(siteRepository.findAll());
-
-        return ResponseEntity.ok("Индексация запущена");
     }
 
     @GetMapping("/stopIndexing")
