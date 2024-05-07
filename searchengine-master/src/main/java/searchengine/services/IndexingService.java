@@ -3,6 +3,7 @@ import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import searchengine.model.*;
 
@@ -21,7 +22,7 @@ public class IndexingService {
     private final PageRepository pageRepository;
     private final LemmaRepository lemmaRepository;
     private final IndexRepository indexRepository;
-
+    @Autowired
     public IndexingService(SiteRepository siteRepository, PageRepository pageRepository, LemmaRepository lemmaRepository, IndexRepository indexRepository) {
         this.siteRepository = siteRepository;
         this.pageRepository = pageRepository;
@@ -83,7 +84,6 @@ public class IndexingService {
 
 
 
-
     private Site createNewSiteEntry(Site siteConfig) {
         if (siteConfig == null) {
             return null; // Лучше обрабатывать ситуацию, когда siteConfig равен null
@@ -94,8 +94,18 @@ public class IndexingService {
         site.setUrl(siteConfig.getUrl());
         site.setName(siteConfig.getName());
         site.setStatusTime(new Timestamp(System.currentTimeMillis()));
-        return siteRepository.save(site);
+
+        // Логгирование перед вызовом save
+        System.out.println("Попытка сохранить сайт: " + site);
+
+        Site savedSite = siteRepository.save(site);
+
+        // Логгирование после вызова save
+        System.out.println("Сайт сохранен: " + savedSite);
+
+        return savedSite;
     }
+
 
     public Page createNewPageEntry(Site site, String pageURL) {
         // Создаем новую запись о странице

@@ -1,7 +1,18 @@
 package searchengine.model;
-import jakarta.persistence.*;
-import javax.validation.constraints.Size;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Table;
+import jakarta.persistence.Id;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.Column;
+
+
 import lombok.Data;
+
+import javax.validation.constraints.Size;
+
 
 @Data
 @Entity

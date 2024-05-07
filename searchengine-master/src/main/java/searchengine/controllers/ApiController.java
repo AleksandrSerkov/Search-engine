@@ -10,7 +10,6 @@ import searchengine.model.SiteRepository;
 
 import searchengine.model.Status;
 import searchengine.services.IndexingService;
-import searchengine.services.SiteService;
 import searchengine.services.StatisticsService;
 import java.util.List;
 import java.util.Map;
