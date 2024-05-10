@@ -1,4 +1,4 @@
-package searchengine.model;
+package searchengine.entity;
 import jakarta.persistence.*;
 import lombok.Data;
 import lombok.EqualsAndHashCode;

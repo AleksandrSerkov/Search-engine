@@ -1,4 +1,21 @@
-# example values
+logging:
+  level:
+    root: info
+    org:
+      springframework:
+        data:
+          jpa: debug
+  appenders:
+    - type: console
+      name: CONSOLE
+  loggers:
+    root:
+      level: "${logging.level.root}"
+      appenderRefs:
+        - ref: CONSOLE
+
+
+
 indexing-settings:
   sites:
     - url: https://www.lenta.ru
@@ -11,9 +28,13 @@ indexing-settings:
       name: Radiomv.ru
     - url: https://ipfran.ru
       name: Ipfran.ru
+
 server:
   port: 8080
 spring:
+  main:
+    allow-bean-definition-overriding: true
+
   datasource:
     username: root
     password: ytafhbfy
@@ -32,4 +53,3 @@ spring:
         dialect: org.hibernate.dialect.MySQL8Dialect
         temp:
           use_jdbc_metadata_defaults: false
-

@@ -1,21 +1,28 @@
 package searchengine.controllers;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.*;
-import searchengine.config.Site;
+
 import searchengine.config.SitesList;
 import searchengine.dto.statistics.StatisticsResponse;
+
+import java.util.ArrayList;
 import java.util.Date;
-import searchengine.model.SiteRepository;
+
+import searchengine.entity.Site;
+import searchengine.repository.SiteRepository;
 
 import searchengine.model.Status;
 import searchengine.services.IndexingService;
+import searchengine.services.SiteService;
 import searchengine.services.StatisticsService;
 import java.util.List;
 import java.util.Map;
 
 @RestController
 @RequestMapping("/api")
+@Controller
 public class ApiController {
 
     private final StatisticsService statisticsService;
@@ -23,13 +30,13 @@ public class ApiController {
     private final SitesList sitesList;
     private boolean isIndexingInProgress = false;
     private final SiteRepository siteRepository;
-
-    public ApiController(StatisticsService statisticsService,  IndexingService indexingService, SitesList sitesList, SiteRepository siteRepository) {
+    private final SiteService siteService;
+    public ApiController(StatisticsService statisticsService,  IndexingService indexingService, SitesList sitesList, SiteRepository siteRepository,SiteService siteService) {
         this.statisticsService = statisticsService;
         this.indexingService = indexingService;
         this.sitesList = sitesList;
         this.siteRepository = siteRepository;
-
+this.siteService =siteService;
     }
     @PostMapping("/indexPage")
     public ResponseEntity<?> indexPage(@RequestParam String url) {
@@ -79,27 +86,29 @@ public class ApiController {
 
         return ResponseEntity.ok().body("Индексация успешно остановлена");
     }
+
+
     private void startIndexingService() {
         isIndexingInProgress = true;
 
-        // Запуск сервиса индексации сайтов в отдельном потоке
         new Thread(() -> {
             try {
-                List<Site> sites = sitesList.getSites();
+                List<Site> modelSites = new ArrayList<>();
+
+                List<Site> sites = siteService.getAllSites();
 
                 for (Site site : sites) {
-                    // Создание нового объекта Site для передачи данных в базу данных
-                    searchengine.model.Site currentSite = new searchengine.model.Site();
-                    // Заполнение полей объекта currentSite значениями из объекта site
-                    currentSite.setStatus(Status.INDEXING);
-                    currentSite.setStatusTime(new Date());
-                    currentSite.setUrl(site.getUrl());
-                    currentSite.setName(site.getName());
+                    Site modelSite = new Site();
+                    modelSite.setStatus(Status.INDEXING);
+                    modelSite.setStatusTime(new Date());
+                    modelSite.setUrl(site.getUrl());
 
-                    // Сохранить объект currentSite в базе данных (с использованием JPA или другой ORM)
-                    siteRepository.save(currentSite);
-                    // Инициирование процесса индексации
-                    indexingService.processSitePages(currentSite, site.getUrl());
+                    modelSites.add(modelSite);
+                }
+
+                for (Site modelSite : modelSites) {
+                    siteRepository.save(modelSite);
+                    indexingService.processSitePages(modelSite, modelSite.getUrl());
                 }
             } catch (Exception e) {
                 e.printStackTrace();
@@ -108,6 +117,11 @@ public class ApiController {
             }
         }).start();
     }
+
+
+
+
+
 
 
 

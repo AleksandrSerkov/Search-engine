@@ -1,38 +1,50 @@
 package searchengine.config;
-import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.jdbc.DataSourceProperties;
+import org.springframework.boot.autoconfigure.orm.jpa.JpaProperties;
+import org.springframework.boot.orm.jpa.EntityManagerFactoryBuilder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.jdbc.datasource.DriverManagerDataSource;
-import javax.annotation.sql.DataSourceDefinition;
+import org.springframework.orm.jpa.JpaTransactionManager;
+import org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.boot.autoconfigure.domain.EntityScan;
+import org.springframework.data.jpa.repository.config.EnableJpaRepositories; // Добавлен импорт
+
+import jakarta.persistence.EntityManagerFactory;
+import searchengine.logi.MyLogger;
+
 import javax.sql.DataSource;
+import java.util.HashMap;
 
-@DataSourceDefinition(
-        name = "java:global/jdbc/MyDataSource",
-        className = "com.mysql.cj.jdbc.Driver",
-        url = "${spring.datasource.url}",
-        user = "${spring.datasource.username}",
-        password = "${spring.datasource.password}"
-)
 @Configuration
+@EntityScan(basePackages = "searchengine.entity")
+@EnableJpaRepositories(basePackages = "searchengine.repository") // Добавляем @EnableJpaRepositories
 public class DatabaseConfig {
-    @Value("${spring.datasource.username}")
-    private String username;
-
-    @Value("${spring.datasource.password}")
-    private String password;
-
-    @Value("${spring.datasource.url}")
-    private String url;
 
     @Bean
-    public DataSource dataSource() {
-        DriverManagerDataSource dataSource = new DriverManagerDataSource();
-        dataSource.setDriverClassName("com.mysql.cj.jdbc.Driver");
-        dataSource.setUrl(url);
-        dataSource.setUsername(username);
-        dataSource.setPassword(password);
-        return dataSource;
+    public LocalContainerEntityManagerFactoryBean entityManagerFactory(EntityManagerFactoryBuilder builder,
+                                                                       DataSourceProperties dataSourceProperties,
+                                                                       JpaProperties jpaProperties) {
+        HashMap<String, Object> properties = new HashMap<>();
+        properties.putAll(jpaProperties.getProperties());
+
+        return builder
+                .dataSource(dataSourceProperties.initializeDataSourceBuilder().build())
+                .packages("searchengine.entity")
+                .properties(properties)
+                .build();
     }
 
-    // Другие бины, методы конфигурации и компоненты...
+    @Bean
+    public PlatformTransactionManager transactionManager(EntityManagerFactory entityManagerFactory) {
+        return new JpaTransactionManager(entityManagerFactory);
+    }
+
+    @Bean
+    public String message() {
+        return "Your data here"; // Замени на свои данные
+    }
+
 }
+
+

@@ -1,4 +1,4 @@
-package searchengine.model;
+package searchengine.entity;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Table;
 import jakarta.persistence.Id;
@@ -17,6 +17,7 @@ import javax.validation.constraints.Size;
 @Data
 @Entity
 @Table(name = "page")
+
 public class Page {
 
     @Id

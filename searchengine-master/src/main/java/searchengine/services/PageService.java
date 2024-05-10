@@ -4,7 +4,14 @@ import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import searchengine.model.*;
+import searchengine.entity.Index;
+import searchengine.entity.Lemma;
+import searchengine.entity.Page;
+import searchengine.entity.Site;
+import searchengine.repository.IndexRepository;
+import searchengine.repository.LemmaRepository;
+import searchengine.repository.PageRepository;
+import searchengine.repository.SiteRepository;
 
 import java.io.IOException;
 import java.util.HashMap;

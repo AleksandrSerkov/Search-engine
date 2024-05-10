@@ -1,10 +1,10 @@
-package searchengine.model;
+package searchengine.entity;
 import jakarta.persistence.*;
 import lombok.*;
+import searchengine.model.Status;
 
 import java.util.Date;
 
-import java.time.LocalDateTime;
 @Data
 @Entity
 @Table(name = "site")

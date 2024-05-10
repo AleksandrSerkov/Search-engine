@@ -5,16 +5,24 @@ import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import searchengine.entity.Index;
+import searchengine.entity.Lemma;
+import searchengine.entity.Site;
 import searchengine.model.*;
 
 import java.io.IOException;
 import java.sql.Timestamp;
 
 import java.util.*;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
-import searchengine.model.SiteRepository;
-import searchengine.model.PageRepository;
-import searchengine.model.Page;
+import searchengine.repository.IndexRepository;
+import searchengine.repository.LemmaRepository;
+import searchengine.repository.SiteRepository;
+import searchengine.repository.PageRepository;
+import searchengine.entity.Page;
 
 @Service
 public class IndexingService {
@@ -116,52 +124,52 @@ public class IndexingService {
         // Сохраняем запись о странице в базу данных
         return pageRepository.save(page);
     }
-    public void processSitePages(Site site, String url) throws IOException, InterruptedException {
-        // Получаем страницу с сайта
+    public void processSitePages(Site site, String url) throws IOException {
         Document doc = Jsoup.connect(url).get();
-
-        // Получаем HTML-код страницы
         String content = doc.outerHtml();
 
-        // Проверяем, что страница не равна null перед сохранением
         if (content != null && !content.isEmpty()) {
-            // Создаем новую страницу
             Page page = new Page();
             page.setSite(site);
             page.setPath(url);
             page.setCode(200);
             page.setContent(content);
-
-            // Сохраняем страницу в базу данных
             pageRepository.save(page);
 
-            // Собираем уникальные ссылки с текущей страницы
             Set<String> uniqueLinks = new HashSet<>();
             Elements links = doc.select("a[href]");
+            ScheduledExecutorService executor = Executors.newScheduledThreadPool(5);
+
             for (Element link : links) {
                 String linkUrl = link.absUrl("href");
 
-                // Проверяем валидность ссылки и уникальность
                 if (isValidLink(linkUrl) && !uniqueLinks.contains(linkUrl)) {
-                    uniqueLinks.add(linkUrl); // Добавляем ссылку в сет уникальных ссылок
-
-                    try {
-                        // Создаем новую страницу и обрабатываем ее содержимое
-                        Page newPage = createNewPageEntry(site, linkUrl);
-                        processPageContent(newPage, linkUrl);
-
-                        // Добавляем случайную задержку перед следующим запросом
-                        Thread.sleep(500 + (long) (Math.random() * 4500));
-                    } catch (Exception e) {
-                        // Обрабатываем ошибку при обработке страницы
-                    }
+                    uniqueLinks.add(linkUrl);
+                    executor.schedule(() -> {
+                        try {
+                            Page newPage = createNewPageEntry(site, linkUrl);
+                            processPageContent(newPage, linkUrl);
+                        } catch (Exception e) {
+                            // Обработка ошибок
+                        }
+                    }, 500 + (long) (Math.random() * 4500), TimeUnit.MILLISECONDS);
                 }
             }
+
+            // Ждем завершения всех запланированных задач
+            executor.shutdown();
+            try {
+                executor.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
         } else {
-            // Обновляем информацию об ошибке, если HTML-код страницы равен null или пустой
             updateSiteLastError(site, "Failed to retrieve HTML content for URL: " + url);
         }
     }
+
+
+
 
 
 

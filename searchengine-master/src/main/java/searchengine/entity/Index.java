@@ -1,6 +1,7 @@
-package searchengine.model;
+package searchengine.entity;
 import jakarta.persistence.*;
 import lombok.Data;
+
 @Data
 @Entity
 @Table(name = "idx")
@@ -9,6 +10,8 @@ public class Index {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "id", nullable = false, unique = true)
+
+
     private Integer id;
 
     @Column(name = "page_id", nullable = false)
