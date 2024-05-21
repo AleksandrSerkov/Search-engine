@@ -87,7 +87,7 @@ this.siteService =siteService;
         return ResponseEntity.ok().body("Индексация успешно остановлена");
     }
 
-
+    @PostMapping("/startIndexing")
     private void startIndexingService() {
         isIndexingInProgress = true;
 

@@ -11,9 +11,7 @@ import org.springframework.boot.autoconfigure.domain.EntityScan;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories; // Добавлен импорт
 
 import jakarta.persistence.EntityManagerFactory;
-import searchengine.logi.MyLogger;
 
-import javax.sql.DataSource;
 import java.util.HashMap;
 
 @Configuration
@@ -42,7 +40,7 @@ public class DatabaseConfig {
 
     @Bean
     public String message() {
-        return "Your data here"; // Замени на свои данные
+        return "data here";
     }
 
 }

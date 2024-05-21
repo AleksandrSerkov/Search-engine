@@ -1,20 +1,27 @@
+mysqld:
+  log_output: TABLE
+
 logging:
   level:
-    root: info
-    org:
-      springframework:
-        data:
-          jpa: debug
+    root: warn
   appenders:
-    - type: console
-      name: CONSOLE
+    Console:
+      name: Console
+      target: SYSTEM_OUT
+      PatternLayout:
+        Pattern: "%d{HH:mm:ss.SSS} [%t] %-5level %logger{36} - %msg%n"
+    File:
+      name: File
+      fileName: logs/myapp.log
+      append: true
+      PatternLayout:
+        Pattern: "%d{HH:mm:ss.SSS} [%t] %-5level %logger{36} - %msg%n"
   loggers:
-    root:
-      level: "${logging.level.root}"
-      appenderRefs:
-        - ref: CONSOLE
-
-
+    Root:
+      level: debug
+      AppenderRef:
+        - ref: Console
+        - ref: File
 
 indexing-settings:
   sites:
@@ -53,3 +60,4 @@ spring:
         dialect: org.hibernate.dialect.MySQL8Dialect
         temp:
           use_jdbc_metadata_defaults: false
+
