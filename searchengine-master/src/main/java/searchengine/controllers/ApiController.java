@@ -19,25 +19,28 @@ import searchengine.services.SiteService;
 import searchengine.services.StatisticsService;
 import java.util.List;
 import java.util.Map;
-
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 @RestController
 @RequestMapping("/api")
-@Controller
 public class ApiController {
 
     private final StatisticsService statisticsService;
     private final IndexingService indexingService;
-    private final SitesList sitesList;
     private boolean isIndexingInProgress = false;
     private final SiteRepository siteRepository;
     private final SiteService siteService;
-    public ApiController(StatisticsService statisticsService,  IndexingService indexingService, SitesList sitesList, SiteRepository siteRepository,SiteService siteService) {
+
+    // Логгер (пример использования SLF4J)
+    private static final Logger logger = LoggerFactory.getLogger(ApiController.class);
+
+    public ApiController(StatisticsService statisticsService, IndexingService indexingService, SiteRepository siteRepository, SiteService siteService) {
         this.statisticsService = statisticsService;
         this.indexingService = indexingService;
-        this.sitesList = sitesList;
         this.siteRepository = siteRepository;
-this.siteService =siteService;
+        this.siteService = siteService;
     }
+
     @PostMapping("/indexPage")
     public ResponseEntity<?> indexPage(@RequestParam String url) {
         if (!isValidUrl(url)) {
@@ -57,6 +60,7 @@ this.siteService =siteService;
     public ResponseEntity<StatisticsResponse> statistics() {
         return ResponseEntity.ok(statisticsService.getStatistics());
     }
+
     @GetMapping("/startIndexing")
     public ResponseEntity<?> startIndexing() {
         synchronized (this) {
@@ -64,15 +68,8 @@ this.siteService =siteService;
                 return ResponseEntity.badRequest().body("Индексация уже запущена");
             }
 
-            isIndexingInProgress = true;
-
-            try {
-                indexingService.startIndexing(siteRepository.findAll());
-                return ResponseEntity.ok("Индексация запущена");
-            } catch (Exception e) {
-                isIndexingInProgress = false; // Сброс флага в случае ошибки
-                return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Произошла ошибка при запуске индексации");
-            }
+            startIndexingService();
+            return ResponseEntity.ok("Индексация запущена");
         }
     }
 
@@ -87,14 +84,12 @@ this.siteService =siteService;
         return ResponseEntity.ok().body("Индексация успешно остановлена");
     }
 
-    @PostMapping("/startIndexing")
     private void startIndexingService() {
         isIndexingInProgress = true;
 
         new Thread(() -> {
             try {
                 List<Site> modelSites = new ArrayList<>();
-
                 List<Site> sites = siteService.getAllSites();
 
                 for (Site site : sites) {
@@ -104,24 +99,25 @@ this.siteService =siteService;
                     modelSite.setUrl(site.getUrl());
 
                     modelSites.add(modelSite);
+
+                    try {
+                        // Сохранение модифицированного сайта в базу данных
+                        siteRepository.save(modelSite);
+                    } catch (Exception e) {
+                        logger.error("Ошибка при сохранении модифицированного сайта в базу данных", e);
+                    }
                 }
 
                 for (Site modelSite : modelSites) {
-                    siteRepository.save(modelSite);
                     indexingService.processSitePages(modelSite, modelSite.getUrl());
                 }
             } catch (Exception e) {
-                e.printStackTrace();
+                logger.error("Ошибка при индексации", e);
             } finally {
                 isIndexingInProgress = false;
             }
         }).start();
     }
-
-
-
-
-
 
 
 

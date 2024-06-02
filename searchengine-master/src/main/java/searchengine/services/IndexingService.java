@@ -38,11 +38,6 @@ public class IndexingService {
         this.indexRepository = indexRepository;
 
     }// Метод для индексирования страницы
-
-
-
-
-
     // Метод для очистки HTML-тегов
     public String cleanHtmlTags(String htmlContent) {
         Document doc = Jsoup.parse(htmlContent);
@@ -80,18 +75,6 @@ public class IndexingService {
             }
         }
     }
-
-
-
-
-
-
-
-
-
-
-
-
     private Site createNewSiteEntry(Site siteConfig) {
         if (siteConfig == null) {
             return null; // Лучше обрабатывать ситуацию, когда siteConfig равен null
@@ -167,13 +150,6 @@ public class IndexingService {
             updateSiteLastError(site, "Failed to retrieve HTML content for URL: " + url);
         }
     }
-
-
-
-
-
-
-
     public void processPageContent(Page page, String url) {
         try {
             // Получаем страницу с сайта
@@ -210,12 +186,6 @@ public class IndexingService {
             System.out.println("Error while processing page content: " + e.getMessage());
         }
     }
-
-
-
-
-
-
 
     private void updateSiteStatus(Site site, Status status) {
         site.setStatus(status);

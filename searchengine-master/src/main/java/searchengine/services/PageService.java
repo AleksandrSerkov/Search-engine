@@ -68,7 +68,7 @@ public class PageService {
         Page page = new Page();
         page.setPath(url);
         page.setContent(htmlContent);
-        pageRepository.save(page);
+        savePage(page);
 
         // Преобразуем HTML-код в набор лемм
         String text = indexingService.cleanHtmlTags(htmlContent);

@@ -37,7 +37,7 @@ indexing-settings:
       name: Ipfran.ru
 
 server:
-  port: 8080
+  port: 8081
 spring:
   main:
     allow-bean-definition-overriding: true
