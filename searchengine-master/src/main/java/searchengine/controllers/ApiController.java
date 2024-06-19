@@ -1,44 +1,46 @@
 package searchengine.controllers;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
-import org.springframework.stereotype.Controller;
-import org.springframework.web.bind.annotation.*;
-
-import searchengine.config.SitesList;
-import searchengine.dto.statistics.StatisticsResponse;
 
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
+import lombok.Value;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.http.ResponseEntity;
+import org.springframework.scheduling.annotation.Async;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.transaction.annotation.Transactional;
+
+import searchengine.config.SitesList;
+import searchengine.dto.statistics.StatisticsResponse;
 import searchengine.entity.Site;
-import searchengine.repository.SiteRepository;
-
 import searchengine.model.Status;
 import searchengine.services.IndexingService;
 import searchengine.services.SiteService;
 import searchengine.services.StatisticsService;
-import java.util.List;
-import java.util.Map;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import searchengine.repository.SiteRepository;
+
 @RestController
 @RequestMapping("/api")
 public class ApiController {
 
     private final StatisticsService statisticsService;
     private final IndexingService indexingService;
-    private boolean isIndexingInProgress = false;
-    private final SiteRepository siteRepository;
     private final SiteService siteService;
-
-    // Логгер (пример использования SLF4J)
+    private final SiteRepository siteRepository;
+    private boolean isIndexingInProgress = false;
+private final SitesList sitesList;
     private static final Logger logger = LoggerFactory.getLogger(ApiController.class);
 
-    public ApiController(StatisticsService statisticsService, IndexingService indexingService, SiteRepository siteRepository, SiteService siteService) {
+    public ApiController(StatisticsService statisticsService, IndexingService indexingService, SiteService siteService, SiteRepository siteRepository,SitesList sitesList ) {
         this.statisticsService = statisticsService;
         this.indexingService = indexingService;
-        this.siteRepository = siteRepository;
         this.siteService = siteService;
+        this.siteRepository = siteRepository;
+        this.sitesList = sitesList;
     }
 
     @PostMapping("/indexPage")
@@ -84,41 +86,57 @@ public class ApiController {
         return ResponseEntity.ok().body("Индексация успешно остановлена");
     }
 
-    private void startIndexingService() {
-        isIndexingInProgress = true;
+    @Async
+    @Transactional
+    public void startIndexingService() {
+        logger.info("Starting indexing process...");
 
-        new Thread(() -> {
-            try {
-                List<Site> modelSites = new ArrayList<>();
-                List<Site> sites = siteService.getAllSites();
+        try {
+            // Получаем список сайтов из sitesList и преобразуем его в нужный тип
+            List<searchengine.entity.Site> sites = sitesList.getSites().stream()
+                    .map(site -> {
+                        searchengine.entity.Site convertedSite = new searchengine.entity.Site();
+                        convertedSite.setUrl(site.getUrl());
+                        convertedSite.setName(site.getName());
+                        return convertedSite;
+                    })
+                    .collect(Collectors.toList());
 
-                for (Site site : sites) {
-                    Site modelSite = new Site();
-                    modelSite.setStatus(Status.INDEXING);
-                    modelSite.setStatusTime(new Date());
-                    modelSite.setUrl(site.getUrl());
-
-                    modelSites.add(modelSite);
-
-                    try {
-                        // Сохранение модифицированного сайта в базу данных
-                        siteRepository.save(modelSite);
-                    } catch (Exception e) {
-                        logger.error("Ошибка при сохранении модифицированного сайта в базу данных", e);
-                    }
-                }
-
-                for (Site modelSite : modelSites) {
-                    indexingService.processSitePages(modelSite, modelSite.getUrl());
-                }
-            } catch (Exception e) {
-                logger.error("Ошибка при индексации", e);
-            } finally {
-                isIndexingInProgress = false;
+            if (sites.isEmpty()) {
+                logger.warn("No sites found in configuration. Loading sites from database...");
+                sites = siteService.getAllSites(); // Загрузка сайтов из базы данных
             }
-        }).start();
+
+            List<searchengine.entity.Site> modifiedSites = new ArrayList<>();
+
+            for (searchengine.entity.Site site : sites) {
+                searchengine.entity.Site modifiedSite = modifyAndSaveSite(site);
+                modifiedSites.add(modifiedSite);
+            }
+
+            for (searchengine.entity.Site modifiedSite : modifiedSites) {
+                indexingService.processSitePages(modifiedSite, modifiedSite.getUrl());
+            }
+
+        } catch (Exception e) {
+            logger.error("Error during indexing process", e);
+        } finally {
+            logger.info("Indexing process completed.");
+        }
     }
 
+    @Transactional
+    private Site modifyAndSaveSite(Site site) {
+        Site modifiedSite = new Site();
+        modifiedSite.setStatus(Status.INDEXING);
+        modifiedSite.setStatusTime(new Date());
+        modifiedSite.setUrl(site.getUrl());
+        modifiedSite.setName(site.getName()); // Пример модификации
+
+        siteService.saveSite(modifiedSite); // Сохраняем модифицированный сайт в базу данных
+
+        return modifiedSite;
+    }
 
 
     private void stopIndexingService() {

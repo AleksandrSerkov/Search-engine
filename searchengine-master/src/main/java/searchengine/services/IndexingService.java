@@ -3,11 +3,16 @@ import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import searchengine.config.SitesList;
 import searchengine.entity.Index;
 import searchengine.entity.Lemma;
 import searchengine.entity.Site;
+
 import searchengine.model.*;
 
 import java.io.IOException;
@@ -31,50 +36,69 @@ public class IndexingService {
     private final LemmaRepository lemmaRepository;
     private final IndexRepository indexRepository;
     @Autowired
+    private  SitesList sitesList;
+    @Autowired
+    private  PageService pageService;
+    @Autowired
+    private  SiteService siteService;
+
+    private List<Site> sites;
+    private boolean isIndexingInProgress = false;
+    @Autowired
     public IndexingService(SiteRepository siteRepository, PageRepository pageRepository, LemmaRepository lemmaRepository, IndexRepository indexRepository) {
         this.siteRepository = siteRepository;
         this.pageRepository = pageRepository;
         this.lemmaRepository = lemmaRepository;
         this.indexRepository = indexRepository;
 
-    }// Метод для индексирования страницы
-    // Метод для очистки HTML-тегов
+    }
+    private static final Logger logger = LoggerFactory.getLogger(IndexingService.class);
+
+
+    @Async
+    public void startIndexing(List<Site> sites) {
+        logger.info("Starting indexing process...");
+
+        try {
+            this.sites = sites;
+
+            if (sites.isEmpty()) {
+                logger.warn("No sites found in configuration.");
+                return;
+            }
+
+            // Используем стрим для обработки каждого сайта
+            sites.stream()
+                    .map(this::createNewSiteEntry)
+                    .filter(modifiedSite -> modifiedSite != null)
+                    .forEach(modifiedSite -> {
+                        String url = modifiedSite.getUrl();
+                        processSitePages(modifiedSite, url);
+                        try {
+                            pageService.indexPage(url);
+                        } catch (IOException e) {
+                            throw new RuntimeException(e);
+                        }
+                        updateSiteStatus(modifiedSite, Status.INDEXED);
+                    });
+
+        } catch (Exception e) {
+            logger.error("Error during indexing process", e);
+        } finally {
+            logger.info("Indexing process completed.");
+        }
+    }
+
+
+
+    // Метод для индексирования страницы
     public String cleanHtmlTags(String htmlContent) {
         Document doc = Jsoup.parse(htmlContent);
         String text = doc.text();
         return text;
     }
-    public void startIndexing(List<Site> siteConfigs) {
-        PageService pageService = new PageService(pageRepository, lemmaRepository, indexRepository, siteRepository);
 
-        for (Site siteConfig : siteConfigs) {
-            Site site = null;
 
-            try {
-                site = createNewSiteEntry(siteConfig);
-
-                if(site != null) {
-                    String url = site.getUrl();
-                    processSitePages(site, url);
-
-                    pageService.indexPage(url); // передаем URL страницы, а не объект Site
-                    updateSiteStatus(site, Status.INDEXED);
-                } else {
-                    throw new Exception("Failed to create Site object");
-                }
-
-            } catch (Exception e) {
-                // Логируем ошибку
-                System.out.println("Error occurred: " + e.getMessage());
-                if(site != null) {
-                    updateSiteStatus(site, Status.FAILED);
-                    updateSiteLastError(site, e.getMessage());
-                } else {
-                    System.out.println("Site object is null, cannot update status or last error message");
-                }
-            }
-        }
-    }
     private Site createNewSiteEntry(Site siteConfig) {
         if (siteConfig == null) {
             return null; // Лучше обрабатывать ситуацию, когда siteConfig равен null
@@ -107,47 +131,52 @@ public class IndexingService {
         // Сохраняем запись о странице в базу данных
         return pageRepository.save(page);
     }
-    public void processSitePages(Site site, String url) throws IOException {
-        Document doc = Jsoup.connect(url).get();
-        String content = doc.outerHtml();
+    public void processSitePages(Site site, String url) {
+        try {
+            Document doc = Jsoup.connect(url).get();
+            String content = doc.outerHtml();
 
-        if (content != null && !content.isEmpty()) {
-            Page page = new Page();
-            page.setSite(site);
-            page.setPath(url);
-            page.setCode(200);
-            page.setContent(content);
-            pageRepository.save(page);
+            if (content != null && !content.isEmpty()) {
+                // Создаем объект страницы для сохранения в базу данных
+                Page page = new Page();
+                page.setSite(site);
+                page.setPath(url);
+                page.setCode(200);
+                page.setContent(content);
 
-            Set<String> uniqueLinks = new HashSet<>();
-            Elements links = doc.select("a[href]");
-            ScheduledExecutorService executor = Executors.newScheduledThreadPool(5);
+                // Сохраняем страницу в базу данных
+                page = pageRepository.save(page);
 
-            for (Element link : links) {
-                String linkUrl = link.absUrl("href");
+                // Обработка ссылок на другие страницы
+                processLinks(site, doc);
+            } else {
+                updateSiteLastError(site, "Failed to retrieve HTML content for URL: " + url);
+            }
+        } catch (IOException e) {
+            updateSiteLastError(site, "Error processing URL: " + url + ". Error: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+    private void processLinks(Site site, Document doc) {
+        Elements links = doc.select("a[href]");
+        Set<String> uniqueLinks = new HashSet<>();
 
-                if (isValidLink(linkUrl) && !uniqueLinks.contains(linkUrl)) {
-                    uniqueLinks.add(linkUrl);
-                    executor.schedule(() -> {
-                        try {
-                            Page newPage = createNewPageEntry(site, linkUrl);
-                            processPageContent(newPage, linkUrl);
-                        } catch (Exception e) {
-                            // Обработка ошибок
-                        }
-                    }, 500 + (long) (Math.random() * 4500), TimeUnit.MILLISECONDS);
+        for (Element link : links) {
+            String linkUrl = link.absUrl("href");
+
+            if (isValidLink(linkUrl) && !uniqueLinks.contains(linkUrl)) {
+                uniqueLinks.add(linkUrl);
+
+                try {
+                    // Создаем новую запись о странице и обрабатываем ее контент
+                    Page newPage = createNewPageEntry(site, linkUrl);
+                    processPageContent(newPage, linkUrl);
+                } catch (Exception e) {
+                    // Логируем ошибку обработки страницы
+                    System.err.println("Error processing page: " + linkUrl + ". Error: " + e.getMessage());
+                    e.printStackTrace();
                 }
             }
-
-            // Ждем завершения всех запланированных задач
-            executor.shutdown();
-            try {
-                executor.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-        } else {
-            updateSiteLastError(site, "Failed to retrieve HTML content for URL: " + url);
         }
     }
     public void processPageContent(Page page, String url) {
@@ -159,7 +188,7 @@ public class IndexingService {
             String text = cleanHtmlTags(doc.html());
 
             // Лемматизация текста страницы
-            String[] tokens = text.split("\s+"); // Разделение текста на токены
+            String[] tokens = text.split("\\s+"); // Разделение текста на токены
             List<String> lemmas = new ArrayList<>();
 
             // Пример простой лемматизации: приведение всех слов к нижнему регистру
@@ -183,7 +212,9 @@ public class IndexingService {
             }
 
         } catch (IOException e) {
-            System.out.println("Error while processing page content: " + e.getMessage());
+            // Логируем ошибку обработки содержимого страницы
+            System.err.println("Error while processing page content: " + e.getMessage());
+            e.printStackTrace();
         }
     }
 
@@ -197,18 +228,20 @@ public class IndexingService {
         site.setLastError(error);
         siteRepository.save(site);
     }
+
     private boolean isValidLink(String url) {
         // Проверка наличия протокола http(s)
-        if(!url.startsWith("http://") && !url.startsWith("https://")) {
+        if (!url.startsWith("http://") && !url.startsWith("https://")) {
             return false;
         }
 
         // Проверка формата домена
         String domain = url.split("/")[2];
-        if(!domain.endsWith(".com") && !domain.endsWith(".net") && !domain.endsWith(".org") && !domain.endsWith(".ru")) {
+        if (!domain.endsWith(".com") && !domain.endsWith(".net") && !domain.endsWith(".org") && !domain.endsWith(".ru")) {
             return false;
         }
-// Дополнительная проверка на наличие конечного слеша
+
+        // Дополнительная проверка на наличие конечного слеша
         if (url.endsWith("/")) {
             return false; // В конце URL не должно быть слеша
         }

@@ -1,27 +1,13 @@
-mysqld:
-  log_output: TABLE
-
 logging:
   level:
-    root: warn
-  appenders:
-    Console:
-      name: Console
-      target: SYSTEM_OUT
-      PatternLayout:
-        Pattern: "%d{HH:mm:ss.SSS} [%t] %-5level %logger{36} - %msg%n"
-    File:
-      name: File
-      fileName: logs/myapp.log
-      append: true
-      PatternLayout:
-        Pattern: "%d{HH:mm:ss.SSS} [%t] %-5level %logger{36} - %msg%n"
-  loggers:
-    Root:
-      level: debug
-      AppenderRef:
-        - ref: Console
-        - ref: File
+    org.hibernate.SQL: debug
+    org.hibernate.type.descriptor.sql.BasicBinder: trace
+  logger:
+    additivity: false
+    loggers:
+      org.hibernate.SQL:
+        level: debug
+        appenders: [Console]
 
 indexing-settings:
   sites:
@@ -38,6 +24,7 @@ indexing-settings:
 
 server:
   port: 8081
+
 spring:
   main:
     allow-bean-definition-overriding: true
@@ -53,11 +40,14 @@ spring:
       max-lifetime: 1800000
   jpa:
     generate-ddl: false
-    hibernate:
-      ddl-auto: update
+    show-sql: true
     properties:
       hibernate:
+        ddl-auto: update
         dialect: org.hibernate.dialect.MySQL8Dialect
         temp:
           use_jdbc_metadata_defaults: false
+
+
+
 
