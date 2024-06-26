@@ -1,4 +1,5 @@
 package searchengine.services;
+import org.jsoup.Connection;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -6,6 +7,7 @@ import org.jsoup.select.Elements;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import searchengine.config.SitesList;
@@ -16,18 +18,19 @@ import searchengine.entity.Site;
 import searchengine.model.*;
 
 import java.io.IOException;
+import java.security.cert.X509Certificate;
 import java.sql.Timestamp;
 
 import java.util.*;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
+
 
 import searchengine.repository.IndexRepository;
 import searchengine.repository.LemmaRepository;
 import searchengine.repository.SiteRepository;
 import searchengine.repository.PageRepository;
 import searchengine.entity.Page;
+
+import javax.net.ssl.*;
 
 @Service
 public class IndexingService {
@@ -131,12 +134,26 @@ public class IndexingService {
         // Сохраняем запись о странице в базу данных
         return pageRepository.save(page);
     }
+
     public void processSitePages(Site site, String url) {
         try {
+            // Получаем HTML содержимое страницы
             Document doc = Jsoup.connect(url).get();
-            String content = doc.outerHtml();
+            String content = doc.text(); // Convert HTML content to plain text
 
-            if (content != null && !content.isEmpty()) {
+            // Ограничение на размер контента
+            int maxContentLength = 16 * 1024 * 1024; // 16 MB в байтах
+
+            // Если контент превышает максимальный размер, обрезаем его
+            if (content.getBytes().length > maxContentLength) {
+                content = content.substring(0, maxContentLength);
+            }
+
+            // Проверка на null и пустоту содержимого
+            if (content == null || content.isEmpty()) {
+                System.out.println("Failed to retrieve HTML content for URL: " + url);
+                updateSiteLastError(site, "Failed to retrieve HTML content for URL: " + url);
+            } else {
                 // Создаем объект страницы для сохранения в базу данных
                 Page page = new Page();
                 page.setSite(site);
@@ -145,18 +162,27 @@ public class IndexingService {
                 page.setContent(content);
 
                 // Сохраняем страницу в базу данных
-                page = pageRepository.save(page);
+                pageRepository.save(page);
 
                 // Обработка ссылок на другие страницы
                 processLinks(site, doc);
-            } else {
-                updateSiteLastError(site, "Failed to retrieve HTML content for URL: " + url);
             }
         } catch (IOException e) {
             updateSiteLastError(site, "Error processing URL: " + url + ". Error: " + e.getMessage());
             e.printStackTrace();
+        } catch (DataIntegrityViolationException e) {
+            updateSiteLastError(site, "Data integrity violation: " + e.getMessage());
+            e.printStackTrace();
+        } catch (Exception e) {
+            updateSiteLastError(site, "Unexpected error: " + e.getMessage());
+            e.printStackTrace();
         }
     }
+
+
+
+
+
     private void processLinks(Site site, Document doc) {
         Elements links = doc.select("a[href]");
         Set<String> uniqueLinks = new HashSet<>();
