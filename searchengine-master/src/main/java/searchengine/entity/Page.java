@@ -1,17 +1,15 @@
 package searchengine.entity;
+import javax.validation.constraints.Size;
+
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
-import jakarta.persistence.Table;
-import jakarta.persistence.Id;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
-import jakarta.persistence.ManyToOne;
+import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
-import jakarta.persistence.Column;
-
-
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.Table;
 import lombok.Data;
-
-import javax.validation.constraints.Size;
 
 
 @Data
@@ -35,8 +33,9 @@ public class Page {
     @Column(name = "code", nullable = false)
     private int code;
 
-    @Column(name = "content", nullable = false, columnDefinition = "MEDIUMTEXT")
-    private String content;
+    @Column(name = "content", columnDefinition = "MEDIUMTEXT")
+private String content;
+
 
     // Constructors, getters, and setters
 }
