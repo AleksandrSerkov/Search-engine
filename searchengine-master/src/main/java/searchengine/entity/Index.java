@@ -1,8 +1,13 @@
 package searchengine.entity;
-import jakarta.persistence.*;
-import lombok.Data;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
 
-@Data
+
+
 @Entity
 @Table(name = "idx")
 public class Index {
@@ -25,10 +30,30 @@ public class Index {
 
     @Column(name = "level", nullable = false)
     private Float rank;
+    public Integer getId() {
+        return id;
+    }
 
-    // Constructors, getters, and setters
+    public void setId(Integer id) {
+        this.id = id;
+    }
 
-    // Геттер и сеттер для поля lemma
+    public Integer getPageId() {
+        return pageId;
+    }
+
+    public void setPageId(Integer pageId) {
+        this.pageId = pageId;
+    }
+
+    public Integer getLemmaId() {
+        return lemmaId;
+    }
+
+    public void setLemmaId(Integer lemmaId) {
+        this.lemmaId = lemmaId;
+    }
+
     public String getLemma() {
         return lemma;
     }
@@ -37,8 +62,11 @@ public class Index {
         this.lemma = lemma;
     }
 
-    // Сеттер для pageId
-    public void setPageId(Integer pageId) {
-        this.pageId = pageId;
+    public Float getRank() {
+        return rank;
+    }
+
+    public void setRank(Float rank) {
+        this.rank = rank;
     }
 }

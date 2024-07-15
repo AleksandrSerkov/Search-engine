@@ -1,5 +1,16 @@
 package searchengine.services;
-import org.jsoup.Connection;
+import java.io.IOException;
+import java.io.StringWriter;
+import java.sql.Timestamp;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+
+import javax.xml.bind.JAXBContext;
+import javax.xml.bind.JAXBException;
+import javax.xml.bind.Marshaller;
+
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -10,27 +21,17 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+
 import searchengine.config.SitesList;
 import searchengine.entity.Index;
 import searchengine.entity.Lemma;
+import searchengine.entity.Page;
 import searchengine.entity.Site;
-
-import searchengine.model.*;
-
-import java.io.IOException;
-import java.security.cert.X509Certificate;
-import java.sql.Timestamp;
-
-import java.util.*;
-
-
+import searchengine.model.Status;
 import searchengine.repository.IndexRepository;
 import searchengine.repository.LemmaRepository;
-import searchengine.repository.SiteRepository;
 import searchengine.repository.PageRepository;
-import searchengine.entity.Page;
-
-import javax.net.ssl.*;
+import searchengine.repository.SiteRepository;
 
 @Service
 public class IndexingService {
@@ -104,7 +105,7 @@ public class IndexingService {
 
     private Site createNewSiteEntry(Site siteConfig) {
         if (siteConfig == null) {
-            return null; // Лучше обрабатывать ситуацию, когда siteConfig равен null
+            return null; 
         }
 
         Site site = new Site();
@@ -135,22 +136,41 @@ public class IndexingService {
         return pageRepository.save(page);
     }
 
+    public void processAllSitesPages() {
+        List<Site> sites = siteRepository.findAll();
+    
+        for (Site site : sites) {
+            String url = site.getUrl(); // Получаем URL страницы напрямую
+    
+            processSitePages(site, url); // Передаем объект site и URL страницы
+        }
+    }
+    
+    
+    
     public void processSitePages(Site site, String url) {
         try {
             // Получаем HTML содержимое страницы
             Document doc = Jsoup.connect(url).get();
             String content = doc.text(); // Convert HTML content to plain text
-
+            
+            // Конвертация контента в XML
+            JAXBContext jaxbContext = JAXBContext.newInstance(String.class);
+            Marshaller marshaller = jaxbContext.createMarshaller();
+            StringWriter writer = new StringWriter();
+            marshaller.marshal(content, writer);
+            String xmlContent = writer.toString();
+    
             // Ограничение на размер контента
             int maxContentLength = 16 * 1024 * 1024; // 16 MB в байтах
-
+    
             // Если контент превышает максимальный размер, обрезаем его
-            if (content.getBytes().length > maxContentLength) {
-                content = content.substring(0, maxContentLength);
+            if (xmlContent.getBytes().length > maxContentLength) {
+                xmlContent = xmlContent.substring(0, maxContentLength);
             }
-
+    
             // Проверка на null и пустоту содержимого
-            if (content == null || content.isEmpty()) {
+            if (xmlContent == null || xmlContent.isEmpty()) {
                 System.out.println("Failed to retrieve HTML content for URL: " + url);
                 updateSiteLastError(site, "Failed to retrieve HTML content for URL: " + url);
             } else {
@@ -159,15 +179,15 @@ public class IndexingService {
                 page.setSite(site);
                 page.setPath(url);
                 page.setCode(200);
-                page.setContent(content);
-
+                page.setContent(xmlContent);
+    
                 // Сохраняем страницу в базу данных
                 pageRepository.save(page);
-
+    
                 // Обработка ссылок на другие страницы
                 processLinks(site, doc);
             }
-        } catch (IOException e) {
+        } catch (IOException | JAXBException e) {
             updateSiteLastError(site, "Error processing URL: " + url + ". Error: " + e.getMessage());
             e.printStackTrace();
         } catch (DataIntegrityViolationException e) {
@@ -178,6 +198,7 @@ public class IndexingService {
             e.printStackTrace();
         }
     }
+    
 
 
 

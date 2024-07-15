@@ -1,9 +1,14 @@
 package searchengine.entity;
-import jakarta.persistence.*;
-import lombok.Data;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.Table;
 import lombok.EqualsAndHashCode;
 
-@Data
 @EqualsAndHashCode(exclude = "id")
 @Entity
 @Table(name = "lemma")
@@ -19,8 +24,9 @@ public class Lemma {
     @Column(name = "lemma_text", nullable = false)
     private String lemmaText;
 
-    @Column(name = "frequency", nullable = false)
-    private int frequency;
+    @Column(name = "frequency")
+    private Integer frequency;
+    
 
     public Lemma() {
     }
@@ -43,6 +49,31 @@ public class Lemma {
     // Метод для увеличения значения frequency
     public void incrementFrequency() {
         this.frequency++;
+    }
+    public void setId(int id) {
+        this.id = id;
+    }
+    
+    public int getId() {
+        return id;
+    }
+    
+    public void setSite(Site site) {
+        this.site = site;
+    }
+    
+    public Site getSite() {
+        return site;
+    }
+    
+  
+    
+    public void setFrequency(Integer frequency) {
+        this.frequency = frequency;
+    }
+    
+    public Integer getFrequency() {
+        return frequency;
     }
 
 }

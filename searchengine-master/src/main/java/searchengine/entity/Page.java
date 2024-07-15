@@ -1,6 +1,4 @@
 package searchengine.entity;
-import javax.validation.constraints.Size;
-
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
@@ -9,10 +7,9 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
-import lombok.Data;
 
 
-@Data
+
 @Entity
 @Table(name = "page")
 
@@ -23,11 +20,12 @@ public class Page {
     private int id;
 
     @ManyToOne
-    @JoinColumn(name = "siteid", nullable = false)
-    private Site site;
+@JoinColumn(name = "siteid", nullable = false)
+private Site site;
+
 
     @Column(name = "path", nullable = false, columnDefinition = "TEXT")
-    @Size(max = 255) // добавь эту аннотацию, если нужно ограничить максимальную длину
+// добавь эту аннотацию, если нужно ограничить максимальную длину
     private String path;
 
     @Column(name = "code", nullable = false)
@@ -38,4 +36,43 @@ private String content;
 
 
     // Constructors, getters, and setters
+    public int getId() {
+        return id;
+    }
+    
+    public void setId(int id) {
+        this.id = id;
+    }
+    
+    public Site getSite() {
+        return site;
+    }
+    
+    public void setSite(Site site) {
+        this.site = site;
+    }
+    
+    public String getPath() {
+        return path;
+    }
+    
+    public void setPath(String path) {
+        this.path = path;
+    }
+    
+    public int getCode() {
+        return code;
+    }
+    
+    public void setCode(int code) {
+        this.code = code;
+    }
+    
+    public String getContent() {
+        return content;
+    }
+    
+    public void setContent(String content) {
+        this.content = content;
+    }
 }

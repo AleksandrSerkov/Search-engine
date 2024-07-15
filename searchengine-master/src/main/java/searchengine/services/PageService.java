@@ -1,9 +1,15 @@
 package searchengine.services;
-import jakarta.persistence.EntityNotFoundException;
+import java.io.IOException;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+
+import jakarta.persistence.EntityNotFoundException;
 import searchengine.entity.Index;
 import searchengine.entity.Lemma;
 import searchengine.entity.Page;
@@ -12,11 +18,6 @@ import searchengine.repository.IndexRepository;
 import searchengine.repository.LemmaRepository;
 import searchengine.repository.PageRepository;
 import searchengine.repository.SiteRepository;
-
-import java.io.IOException;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
 
 @Service
 public class PageService {
@@ -87,8 +88,9 @@ public class PageService {
 
             Lemma lemmaEntity = lemmaRepository.findByLemmaText(lemmaText);
             if (lemmaEntity == null) {
-                Site site = siteRepository.findById(1L).orElseThrow(EntityNotFoundException::new);
-                lemmaEntity = new Lemma();
+                int siteId = 1;
+                Site site = siteRepository.findById(siteId).orElseThrow(() -> new EntityNotFoundException("Site with id 1 not found"));
+                                lemmaEntity = new Lemma();
                 lemmaEntity.setLemmaText(lemmaText);
                 lemmaEntity.setSite(site);
                 lemmaEntity.setFrequency(1); // Устанавливаем начальное значение частоты
