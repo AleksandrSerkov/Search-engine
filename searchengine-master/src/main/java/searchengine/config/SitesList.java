@@ -11,11 +11,11 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "indexing-settings")
 public class SitesList {
     private List<Site> sites;
-    public List<Site> getSites() {
+    public List<Site> getSitesList() {
         return sites;
     }
 
-    public void setSites(List<Site> sites) {
+    public void setSitesList(List<Site> sites) {
         this.sites = sites;
     }
     

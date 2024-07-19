@@ -107,7 +107,7 @@ public ResponseEntity<?> indexPage(@RequestParam String url) {
         return ResponseEntity.ok().body("Индексация успешно остановлена");
     }
 
-  @Async
+@Async
 @Transactional
 public void startIndexingService() {
     logger.info("Starting indexing process...");

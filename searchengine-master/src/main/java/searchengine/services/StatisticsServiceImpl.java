@@ -1,24 +1,29 @@
 package searchengine.services;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Random;
 
-import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+
 import searchengine.config.Site;
 import searchengine.config.SitesList;
 import searchengine.dto.statistics.DetailedStatisticsItem;
 import searchengine.dto.statistics.StatisticsData;
 import searchengine.dto.statistics.StatisticsResponse;
 import searchengine.dto.statistics.TotalStatistics;
-
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Random;
+import searchengine.repository.SiteRepository;
 
 @Service
-@RequiredArgsConstructor
 public class StatisticsServiceImpl implements StatisticsService {
 
     private final Random random = new Random();
     private final SitesList sites;
+    private final SiteRepository siteRepository; // Поле для SiteRepository
+
+    public StatisticsServiceImpl(SitesList sites, SiteRepository siteRepository) {
+        this.sites = sites;
+        this.siteRepository = siteRepository;
+    }
 
     @Override
     public StatisticsResponse getStatistics() {
@@ -30,11 +35,11 @@ public class StatisticsServiceImpl implements StatisticsService {
         };
 
         TotalStatistics total = new TotalStatistics();
-        total.setSites(sites.getSites().size());
+        total.setSites(sites.getSitesList().size());
         total.setIndexing(true);
 
         List<DetailedStatisticsItem> detailed = new ArrayList<>();
-        List<Site> sitesList = sites.getSites();
+        List<Site> sitesList = sites.getSitesList();
         for(int i = 0; i < sitesList.size(); i++) {
             Site site = sitesList.get(i);
             DetailedStatisticsItem item = new DetailedStatisticsItem();
