@@ -120,7 +120,7 @@ public void startIndexingService() {
             logger.warn("No sites found in the database. Loading sites from the configuration...");
 
             if (sitesList != null) {
-                List<searchengine.entity.Site> sitesFromConfig = sitesList.getSitesList().stream()
+                List<searchengine.entity.Site> sitesFromConfig = sitesList.getSites().stream()
                     .filter(Objects::nonNull)
                     .map(siteConfig -> {
                         searchengine.entity.Site site = new searchengine.entity.Site();

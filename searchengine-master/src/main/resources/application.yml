@@ -1,13 +1,20 @@
 logging:
+  file:
+    name: /home/norrak/Рабочий стол/logi/logfile.log
   level:
     org.hibernate.SQL: debug
     org.hibernate.type.descriptor.sql.BasicBinder: trace
+    org.springframework.boot: info
   logger:
     additivity: false
     loggers:
       org.hibernate.SQL:
         level: debug
         appenders: [Console]
+      org.springframework.boot:
+        level: info
+        appenders: [Console]
+
 
 indexing-settings:
   sites:

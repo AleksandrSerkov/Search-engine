@@ -1,15 +1,13 @@
 package searchengine.services;
 import java.io.IOException;
 import java.io.StringWriter;
+import java.nio.charset.StandardCharsets;
 import java.sql.Timestamp;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-
-import javax.xml.bind.JAXBContext;
-import javax.xml.bind.JAXBException;
-import javax.xml.bind.Marshaller;
 
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
@@ -22,6 +20,8 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
+import com.fasterxml.jackson.dataformat.xml.XmlMapper;
+
 import searchengine.config.SitesList;
 import searchengine.entity.Index;
 import searchengine.entity.Lemma;
@@ -32,13 +32,14 @@ import searchengine.repository.IndexRepository;
 import searchengine.repository.LemmaRepository;
 import searchengine.repository.PageRepository;
 import searchengine.repository.SiteRepository;
-
+import searchengine.utils.XmlMapperFactory;
 @Service
 public class IndexingService {
     private final SiteRepository siteRepository;
     private final PageRepository pageRepository;
     private final LemmaRepository lemmaRepository;
     private final IndexRepository indexRepository;
+  
     @Autowired
     private  SitesList sitesList;
     @Autowired
@@ -54,7 +55,7 @@ public class IndexingService {
         this.pageRepository = pageRepository;
         this.lemmaRepository = lemmaRepository;
         this.indexRepository = indexRepository;
-
+        
     }
     private static final Logger logger = LoggerFactory.getLogger(IndexingService.class);
 
@@ -149,57 +150,66 @@ public class IndexingService {
     
     
     public void processSitePages(Site site, String url) {
-        try {
-            // Получаем HTML содержимое страницы
-            Document doc = Jsoup.connect(url).get();
-            String content = doc.text(); // Convert HTML content to plain text
-            
-            // Конвертация контента в XML
-            JAXBContext jaxbContext = JAXBContext.newInstance(String.class);
-            Marshaller marshaller = jaxbContext.createMarshaller();
-            StringWriter writer = new StringWriter();
-            marshaller.marshal(content, writer);
-            String xmlContent = writer.toString();
-    
-            // Ограничение на размер контента
-            int maxContentLength = 16 * 1024 * 1024; // 16 MB в байтах
-    
-            // Если контент превышает максимальный размер, обрезаем его
-            if (xmlContent.getBytes().length > maxContentLength) {
-                xmlContent = xmlContent.substring(0, maxContentLength);
-            }
-    
-            // Проверка на null и пустоту содержимого
-            if (xmlContent == null || xmlContent.isEmpty()) {
-                System.out.println("Failed to retrieve HTML content for URL: " + url);
-                updateSiteLastError(site, "Failed to retrieve HTML content for URL: " + url);
-            } else {
-                // Создаем объект страницы для сохранения в базу данных
-                Page page = new Page();
-                page.setSite(site);
-                page.setPath(url);
-                page.setCode(200);
-                page.setContent(xmlContent);
-    
-                // Сохраняем страницу в базу данных
-                pageRepository.save(page);
-    
-                // Обработка ссылок на другие страницы
-                processLinks(site, doc);
-            }
-        } catch (IOException | JAXBException e) {
-            updateSiteLastError(site, "Error processing URL: " + url + ". Error: " + e.getMessage());
-            e.printStackTrace();
-        } catch (DataIntegrityViolationException e) {
-            updateSiteLastError(site, "Data integrity violation: " + e.getMessage());
-            e.printStackTrace();
-        } catch (Exception e) {
-            updateSiteLastError(site, "Unexpected error: " + e.getMessage());
-            e.printStackTrace();
-        }
-    }
-    
+    XmlMapper xmlMapper = XmlMapperFactory.createXmlMapper(); // Создаем XmlMapper через фабрику
 
+    try {
+        // Логируем начало обработки страницы
+        System.out.println("Starting to process URL: " + url);
+
+        // Устанавливаем таймаут для подключения
+        Document doc = Jsoup.connect(url).timeout(10000).get();
+        String content = doc.text(); // Convert HTML content to plain text
+
+        // Конвертация контента в XML
+        String xmlContent = toXml(content, xmlMapper);
+
+        // Ограничение на размер контента
+        int maxContentLength = 16 * 1024 * 1024; // 16 MB в байтах
+
+        // Если контент превышает максимальный размер, обрезаем его
+        byte[] xmlContentBytes = xmlContent.getBytes(StandardCharsets.UTF_8);
+        if (xmlContentBytes.length > maxContentLength) {
+            xmlContent = new String(Arrays.copyOf(xmlContentBytes, maxContentLength), StandardCharsets.UTF_8);
+        }
+
+        // Проверка на null и пустоту содержимого
+        if (xmlContent == null || xmlContent.isEmpty()) {
+            System.out.println("Failed to retrieve HTML content for URL: " + url);
+            updateSiteLastError(site, "Failed to retrieve HTML content for URL: " + url);
+        } else {
+            // Создаем объект страницы для сохранения в базу данных
+            Page page = new Page();
+            page.setSite(site);
+            page.setPath(url);
+            page.setCode(200);
+            page.setContent(xmlContent);
+
+            // Сохраняем страницу в базу данных
+            pageRepository.save(page);
+
+            // Обработка ссылок на другие страницы
+            processLinks(site, doc);
+        }
+
+        // Логируем успешное завершение обработки страницы
+        System.out.println("Successfully processed URL: " + url);
+    } catch (IOException e) {
+        updateSiteLastError(site, "Error processing URL: " + url + ". Error: " + e.getMessage());
+        e.printStackTrace();
+    } catch (DataIntegrityViolationException e) {
+        updateSiteLastError(site, "Data integrity violation: " + e.getMessage());
+        e.printStackTrace();
+    } catch (Exception e) {
+        updateSiteLastError(site, "Unexpected error: " + e.getMessage());
+        e.printStackTrace();
+    }
+}
+    
+    private String toXml(String content, XmlMapper xmlMapper) throws IOException {
+        StringWriter writer = new StringWriter();
+        xmlMapper.writeValue(writer, content);
+        return writer.toString();
+    }
 
 
 

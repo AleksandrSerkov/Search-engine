@@ -1,6 +1,14 @@
 package searchengine.config;
+import java.security.cert.X509Certificate;
+
+import javax.net.ssl.HttpsURLConnection;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.X509TrustManager;
 import javax.sql.DataSource;
 
+import org.jsoup.Connection;
+import org.jsoup.Jsoup;
 import org.springframework.boot.autoconfigure.domain.EntityScan;
 import org.springframework.boot.autoconfigure.jdbc.DataSourceProperties;
 import org.springframework.boot.autoconfigure.orm.jpa.JpaProperties;
@@ -14,6 +22,7 @@ import org.springframework.orm.jpa.vendor.HibernateJpaVendorAdapter;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.EnableTransactionManagement;
 
+import com.fasterxml.jackson.dataformat.xml.XmlMapper;
 @Configuration
 @EnableTransactionManagement
 @EntityScan(basePackages = "searchengine.entity")
@@ -42,7 +51,10 @@ public class DatabaseConfig {
     
         return entityManagerFactoryBean;
     }
-
+    @Bean
+    public XmlMapper xmlMapper() {
+        return new XmlMapper();
+    }
     @Bean
     public PlatformTransactionManager transactionManager(DataSource dataSource) {
         return new DataSourceTransactionManager(dataSource);
@@ -57,4 +69,29 @@ public class DatabaseConfig {
     public searchengine.entity.Site site() {
         return new searchengine.entity.Site();
     }
+// Добавление конфигурации HttpClientConfig
+    @Bean
+    public Connection jsoupConnection() throws Exception {
+        // Создаем SSLContext, который будет игнорировать все сертификаты
+        SSLContext sslContext = SSLContext.getInstance("TLS");
+        sslContext.init(null, new TrustManager[] { new X509TrustManager() {
+            public X509Certificate[] getAcceptedIssuers() {
+                return null;
+            }
+
+            public void checkClientTrusted(X509Certificate[] certs, String authType) {
+            }
+
+            public void checkServerTrusted(X509Certificate[] certs, String authType) {
+            }
+        }}, new java.security.SecureRandom());
+
+        // Устанавливаем SSLContext и игнорируем hostname verification
+        HttpsURLConnection.setDefaultSSLSocketFactory(sslContext.getSocketFactory());
+        HttpsURLConnection.setDefaultHostnameVerifier((hostname, session) -> true);
+
+        // Возвращаем соединение Jsoup
+        return Jsoup.newSession();
+    }
 }
+
