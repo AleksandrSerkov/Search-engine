@@ -1,5 +1,6 @@
 package searchengine.services;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Random;
 
@@ -18,7 +19,7 @@ public class StatisticsServiceImpl implements StatisticsService {
 
     private final Random random = new Random();
     private final SitesList sites;
-    private final SiteRepository siteRepository; // Поле для SiteRepository
+    private final SiteRepository siteRepository;
 
     public StatisticsServiceImpl(SitesList sites, SiteRepository siteRepository) {
         this.sites = sites;
@@ -35,12 +36,38 @@ public class StatisticsServiceImpl implements StatisticsService {
         };
 
         TotalStatistics total = new TotalStatistics();
-        total.setSites(sites.getSites().size());
+        List<Site> sitesList = sites.getSites();
+        System.out.println("Sites list size: " + sitesList.size()); // Логирование размера списка
+
+        // Проверка на пустой список и вывод значения в консоль
+        boolean isSiteListEmpty = sitesList.isEmpty();
+        System.out.println("Is sites list empty? " + isSiteListEmpty);
+
+        if (isSiteListEmpty) {
+            System.out.println("Sites list is empty.");
+            total.setSites(0);
+            total.setPages(0);
+            total.setLemmas(0);
+            total.setIndexing(false);
+
+            StatisticsResponse response = new StatisticsResponse();
+            StatisticsData data = new StatisticsData();
+            data.setTotal(total);
+            data.setDetailed(Collections.emptyList()); // Пустой список детализированной статистики
+            response.setStatistics(data);
+            response.setResult(true);
+
+            return response;
+        }
+
+        System.out.println("Processing sites list...");
+
+        // Если список не пустой, выполняем основную логику
+        total.setSites(sitesList.size());
         total.setIndexing(true);
 
         List<DetailedStatisticsItem> detailed = new ArrayList<>();
-        List<Site> sitesList = sites.getSites();
-        for(int i = 0; i < sitesList.size(); i++) {
+        for (int i = 0; i < sitesList.size(); i++) {
             Site site = sitesList.get(i);
             DetailedStatisticsItem item = new DetailedStatisticsItem();
             item.setName(site.getName());
@@ -51,8 +78,7 @@ public class StatisticsServiceImpl implements StatisticsService {
             item.setLemmas(lemmas);
             item.setStatus(statuses[i % 3]);
             item.setError(errors[i % 3]);
-            item.setStatusTime(System.currentTimeMillis() -
-                    (random.nextInt(10_000)));
+            item.setStatusTime(System.currentTimeMillis() - (random.nextInt(10_000)));
             total.setPages(total.getPages() + pages);
             total.setLemmas(total.getLemmas() + lemmas);
             detailed.add(item);

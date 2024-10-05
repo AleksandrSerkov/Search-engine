@@ -7,7 +7,9 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
@@ -32,7 +34,6 @@ import searchengine.repository.IndexRepository;
 import searchengine.repository.LemmaRepository;
 import searchengine.repository.PageRepository;
 import searchengine.repository.SiteRepository;
-import searchengine.utils.XmlMapperFactory;
 @Service
 public class IndexingService {
     private final SiteRepository siteRepository;
@@ -61,38 +62,38 @@ public class IndexingService {
 
 
     @Async
-    public void startIndexing(List<Site> sites) {
+    public CompletableFuture<Void> startIndexing(List<Site> sites) {
         logger.info("Starting indexing process...");
-
-        try {
-            this.sites = sites;
-
-            if (sites.isEmpty()) {
-                logger.warn("No sites found in configuration.");
-                return;
-            }
-
-            // Используем стрим для обработки каждого сайта
-            sites.stream()
-                    .map(this::createNewSiteEntry)
-                    .filter(modifiedSite -> modifiedSite != null)
-                    .forEach(modifiedSite -> {
-                        String url = modifiedSite.getUrl();
-                        processSitePages(modifiedSite, url);
-                        try {
-                            pageService.indexPage(url);
-                        } catch (IOException e) {
-                            throw new RuntimeException(e);
-                        }
-                        updateSiteStatus(modifiedSite, Status.INDEXED);
-                    });
-
-        } catch (Exception e) {
-            logger.error("Error during indexing process", e);
-        } finally {
-            logger.info("Indexing process completed.");
+    
+        if (sites == null || sites.isEmpty()) {
+            logger.warn("No sites found in configuration.");
+            return CompletableFuture.completedFuture(null);
         }
+    
+        // Используем CompletableFuture.runAsync для асинхронного выполнения
+        return CompletableFuture.runAsync(() -> {
+            try {
+                sites.stream()
+                    .map(this::createNewSiteEntry)
+                    .filter(Objects::nonNull)
+                    .forEach(modifiedSite -> {
+                        try {
+                            String url = modifiedSite.getUrl();
+                            processSitePages(modifiedSite, url);
+                            pageService.indexPage(url);
+                            updateSiteStatus(modifiedSite, Status.INDEXED);
+                        } catch (IOException e) {
+                            logger.error("Error indexing page: " + modifiedSite.getUrl(), e);
+                        }
+                    });
+            } catch (Exception e) {
+                logger.error("Error during indexing process", e);
+            } finally {
+                logger.info("Indexing process completed.");
+            }
+        });
     }
+    
 
 
 
@@ -148,62 +149,54 @@ public class IndexingService {
     }
     
     
-    
     public void processSitePages(Site site, String url) {
-    XmlMapper xmlMapper = XmlMapperFactory.createXmlMapper(); // Создаем XmlMapper через фабрику
-
-    try {
-        // Логируем начало обработки страницы
-        System.out.println("Starting to process URL: " + url);
-
-        // Устанавливаем таймаут для подключения
-        Document doc = Jsoup.connect(url).timeout(10000).get();
-        String content = doc.text(); // Convert HTML content to plain text
-
-        // Конвертация контента в XML
-        String xmlContent = toXml(content, xmlMapper);
-
-        // Ограничение на размер контента
-        int maxContentLength = 16 * 1024 * 1024; // 16 MB в байтах
-
-        // Если контент превышает максимальный размер, обрезаем его
-        byte[] xmlContentBytes = xmlContent.getBytes(StandardCharsets.UTF_8);
-        if (xmlContentBytes.length > maxContentLength) {
-            xmlContent = new String(Arrays.copyOf(xmlContentBytes, maxContentLength), StandardCharsets.UTF_8);
+        try {
+            // Логируем начало обработки страницы
+            System.out.println("Starting to process URL: " + url);
+    
+            // Устанавливаем таймаут для подключения
+            Document doc = Jsoup.connect(url).timeout(10000).get();
+            String htmlContent = doc.outerHtml(); // Получаем HTML контент страницы
+    
+            // Ограничение на размер контента
+            int maxContentLength = 16 * 1024 * 1024; // 16 MB в байтах
+            byte[] htmlContentBytes = htmlContent.getBytes(StandardCharsets.UTF_8);
+            if (htmlContentBytes.length > maxContentLength) {
+                htmlContent = new String(Arrays.copyOf(htmlContentBytes, maxContentLength), StandardCharsets.UTF_8);
+            }
+    
+            // Проверка на null и пустоту содержимого
+            if (htmlContent == null || htmlContent.isEmpty()) {
+                System.out.println("Failed to retrieve HTML content for URL: " + url);
+                updateSiteLastError(site, "Failed to retrieve HTML content for URL: " + url);
+            } else {
+                // Создаем объект страницы для сохранения в базу данных
+                Page page = new Page();
+                page.setSite(site);
+                page.setPath(url);
+                page.setCode(200);
+                page.setContent(htmlContent);
+    
+                // Сохраняем страницу в базу данных
+                pageRepository.save(page);
+    
+                // Обработка ссылок на другие страницы
+                processLinks(site, doc);
+            }
+    
+            // Логируем успешное завершение обработки страницы
+            System.out.println("Successfully processed URL: " + url);
+        } catch (IOException e) {
+            updateSiteLastError(site, "Error processing URL: " + url + ". Error: " + e.getMessage());
+            e.printStackTrace();
+        } catch (DataIntegrityViolationException e) {
+            updateSiteLastError(site, "Data integrity violation: " + e.getMessage());
+            e.printStackTrace();
+        } catch (Exception e) {
+            updateSiteLastError(site, "Unexpected error: " + e.getMessage());
+            e.printStackTrace();
         }
-
-        // Проверка на null и пустоту содержимого
-        if (xmlContent == null || xmlContent.isEmpty()) {
-            System.out.println("Failed to retrieve HTML content for URL: " + url);
-            updateSiteLastError(site, "Failed to retrieve HTML content for URL: " + url);
-        } else {
-            // Создаем объект страницы для сохранения в базу данных
-            Page page = new Page();
-            page.setSite(site);
-            page.setPath(url);
-            page.setCode(200);
-            page.setContent(xmlContent);
-
-            // Сохраняем страницу в базу данных
-            pageRepository.save(page);
-
-            // Обработка ссылок на другие страницы
-            processLinks(site, doc);
-        }
-
-        // Логируем успешное завершение обработки страницы
-        System.out.println("Successfully processed URL: " + url);
-    } catch (IOException e) {
-        updateSiteLastError(site, "Error processing URL: " + url + ". Error: " + e.getMessage());
-        e.printStackTrace();
-    } catch (DataIntegrityViolationException e) {
-        updateSiteLastError(site, "Data integrity violation: " + e.getMessage());
-        e.printStackTrace();
-    } catch (Exception e) {
-        updateSiteLastError(site, "Unexpected error: " + e.getMessage());
-        e.printStackTrace();
     }
-}
     
     private String toXml(String content, XmlMapper xmlMapper) throws IOException {
         StringWriter writer = new StringWriter();

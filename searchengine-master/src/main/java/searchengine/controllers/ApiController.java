@@ -1,10 +1,11 @@
-package searchengine.controllers;
 
+package searchengine.controllers;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
@@ -35,164 +36,167 @@ public class ApiController {
     private final IndexingService indexingService;
     private final SiteService siteService;
     private final SiteRepository siteRepository;
+    private final SitesList sitesList;
     private boolean isIndexingInProgress = false;
-private final SitesList sitesList;
-private final Site site;
+
     private static final Logger logger = LoggerFactory.getLogger(ApiController.class);
 
-    public ApiController(StatisticsService statisticsService, IndexingService indexingService, SiteService siteService, SiteRepository siteRepository,SitesList sitesList,Site site ) {
+    public ApiController(StatisticsService statisticsService, IndexingService indexingService, SiteService siteService, SiteRepository siteRepository, SitesList sitesList) {
         this.statisticsService = statisticsService;
         this.indexingService = indexingService;
         this.siteService = siteService;
         this.siteRepository = siteRepository;
         this.sitesList = sitesList;
-        this.site = site;
     }
-
-    @PostMapping("/indexPage")
-public ResponseEntity<?> indexPage(@RequestParam String url) {
-    if (!isValidUrl(url)) {
-        return ResponseEntity.badRequest().body(Map.of("result", false, "error", "Неверный адрес страницы"));
+    @GetMapping(value = "/statistics", produces = "application/json")
+    public ResponseEntity<StatisticsResponse> statistics() {
+        try {
+            StatisticsResponse response = statisticsService.getStatistics();
+            logger.info("Отправка статистики: {}", response);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            logger.error("Ошибка при получении статистики", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(null);
+        }
     }
-
-    // Логика добавления или обновления страницы в индексе
+    @PostMapping(value = "/statistics", produces = "application/json")
+public ResponseEntity<StatisticsResponse> statisticsPost() {
     try {
-        searchengine.entity.Site site = new searchengine.entity.Site();
-        site.setUrl(url);
-        site.setName("New Site");
-
-        // Сохраняем сайт в базу данных
-        siteService.saveSite(site);
-
-        // Запускаем процесс индексации для новой страницы
-        indexingService.processSitePages(site, url);
-
+        StatisticsResponse response = statisticsService.getStatistics();
+        logger.info("Отправка статистики через POST-запрос: {}", response);
+        return ResponseEntity.ok(response);
     } catch (Exception e) {
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("result", false, "error", "Ошибка при индексации страницы"));
+        logger.error("Ошибка при получении статистики через POST-запрос", e);
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(null);
     }
-
-    return ResponseEntity.ok(Map.of("result", true));
 }
 
 
-    private boolean isValidUrl(String url) {
-        return url.startsWith("http://") || url.startsWith("https://");
-    }
-
-    @GetMapping("/statistics")
-    public ResponseEntity<StatisticsResponse> statistics() {
-        return ResponseEntity.ok(statisticsService.getStatistics());
-    }
-
-    @GetMapping("/startIndexing")
-    public ResponseEntity<?> startIndexing() {
-        synchronized (this) {
-            if (isIndexingInProgress) {
-                return ResponseEntity.badRequest().body("Индексация уже запущена");
-            }
-
-            startIndexingService();
-            return ResponseEntity.ok("Индексация запущена");
+    @PostMapping(value = "/indexPage", produces = "application/json")
+    public ResponseEntity<Map<String, Object>> indexPage(@RequestParam String url) {
+        if (!isValidUrl(url)) {
+            logger.warn("Invalid URL: {}", url);
+            return ResponseEntity.badRequest().body(Map.of("result", false, "error", "Invalid URL"));
         }
+
+        try {
+            Site site = new Site();
+            site.setUrl(url);
+            site.setName("New Site");
+            siteService.saveSite(site);
+            indexingService.processSitePages(site, url);
+        } catch (Exception e) {
+            logger.error("Ошибка при индексации страницы", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("result", false, "error", "Error while indexing the page"));
+        }
+
+        return ResponseEntity.ok(Map.of("result", true));
     }
 
-    @GetMapping("/stopIndexing")
-    public ResponseEntity<?> stopIndexing() {
+    @GetMapping(value = "/startIndexing", produces = "application/json")
+    public synchronized ResponseEntity<Map<String, Object>> startIndexing() {
+        if (isIndexingInProgress) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("result", false, "error", "Indexing is already in progress"));
+        }
+
+        isIndexingInProgress = true;
+        startIndexingService().thenAccept(result -> logger.info("Indexing completed"));
+        return ResponseEntity.ok(Map.of("result", true, "message", "Indexing started"));
+    }
+
+    @GetMapping(value = "/stopIndexing", produces = "application/json")
+    public synchronized ResponseEntity<Map<String, Object>> stopIndexing() {
         if (!isIndexingInProgress) {
-            return ResponseEntity.badRequest().body("Индексация не запущена");
+            return ResponseEntity.badRequest()
+                    .body(Map.of("result", false, "error", "Indexing is not in progress"));
         }
 
         stopIndexingService();
-
-        return ResponseEntity.ok().body("Индексация успешно остановлена");
+        return ResponseEntity.ok(Map.of("result", true, "message", "Indexing stopped"));
     }
 
-@Async
-@Transactional
-public void startIndexingService() {
-    logger.info("Starting indexing process...");
+    @Async
+    @Transactional
+    public CompletableFuture<ResponseEntity<Map<String, Object>>> startIndexingService() {
+        logger.info("Starting indexing process...");
+        try {
+            List<Site> sitesInDatabase = siteService.getAllSites();
+            if (sitesInDatabase == null || sitesInDatabase.isEmpty()) {
+                logger.debug("No sites found in the database. Loading sites from the configuration...");
+                if (sitesList == null || sitesList.getSites() == null) {
+                    throw new IllegalArgumentException("Configuration error: sitesList is null.");
+                }
 
-    try {
-        // Получаем список сайтов из базы данных
-        List<searchengine.entity.Site> sitesInDatabase = siteService.getAllSites();
+                List<Site> sitesFromConfig = sitesList.getSites().stream()
+                        .filter(Objects::nonNull)
+                        .map(siteConfig -> {
+                            Site site = new Site();
+                            site.setUrl(siteConfig.getUrl());
+                            site.setName(siteConfig.getName());
+                            site.setStatus(Status.INDEXED);
+                            return site;
+                        })
+                        .collect(Collectors.toList());
 
-        if (sitesInDatabase == null || sitesInDatabase.isEmpty()) {
-            logger.warn("No sites found in the database. Loading sites from the configuration...");
+                if (sitesFromConfig.isEmpty()) {
+                    logger.warn("No sites found in the configuration.");
+                    return CompletableFuture.completedFuture(ResponseEntity.badRequest()
+                            .body(Map.of("result", false, "error", "No sites found in the configuration.")));
+                }
 
-            if (sitesList != null) {
-                List<searchengine.entity.Site> sitesFromConfig = sitesList.getSites().stream()
-                    .filter(Objects::nonNull)
-                    .map(siteConfig -> {
-                        searchengine.entity.Site site = new searchengine.entity.Site();
-                        site.setUrl(siteConfig.getUrl());
-                        site.setName(siteConfig.getName());
-                        site.setStatus(Status.INDEXED);
-                        return site;
-                    })
-                    .collect(Collectors.toList());
-
-                // Сохраняем новые сайты в базу данных
-                sitesFromConfig.forEach(site -> {
-                    if (site != null) {
-                        siteService.saveSite(site);
-                        sitesInDatabase.add(site);
-                    }
-                });
+                sitesFromConfig.forEach(siteService::saveSite);
+                sitesInDatabase.addAll(sitesFromConfig);
             }
+
+            List<Site> modifiedSites = modifyAndSaveSites(sitesInDatabase);
+            if (!modifiedSites.isEmpty()) {
+                modifiedSites.forEach(modifiedSite -> {
+                    modifiedSite.setStatus(Status.INDEXING);
+                    siteService.saveSite(modifiedSite);
+                    indexingService.processSitePages(modifiedSite, modifiedSite.getUrl());
+                });
+            } else {
+                logger.info("No sites to process after modification.");
+                return CompletableFuture.completedFuture(ResponseEntity.ok(Map.of("result", true, "message", "No sites to process.")));
+            }
+        } catch (IllegalArgumentException e) {
+            logger.error("Invalid input: ", e);
+            return CompletableFuture.completedFuture(ResponseEntity.badRequest()
+                    .body(Map.of("result", false, "error", e.getMessage())));
+        } catch (Exception e) {
+            logger.error("Error during indexing process", e);
+            return CompletableFuture.completedFuture(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("result", false, "error", "Error during indexing process")));
+        } finally {
+            isIndexingInProgress = false;
+            logger.info("Indexing process completed.");
         }
 
-        // Процесс модификации и индексации сайтов
-        List<searchengine.entity.Site> modifiedSites = modifyAndSaveSites(sitesInDatabase);
+        return CompletableFuture.completedFuture(ResponseEntity.ok(Map.of("result", true, "message", "Indexing process completed.")));
+    }
 
-        modifiedSites.forEach(modifiedSite -> {
+    @Transactional
+    private List<Site> modifyAndSaveSites(List<Site> sites) {
+        List<Site> modifiedSites = new ArrayList<>();
+        for (Site site : sites) {
+            Site modifiedSite = new Site();
             modifiedSite.setStatus(Status.INDEXING);
-            siteService.saveSite(modifiedSite);
-            indexingService.processSitePages(modifiedSite, modifiedSite.getUrl());
-        });
-
-    } catch (Exception e) {
-        logger.error("Error during the indexing process", e);
-    } finally {
-        logger.info("Indexing process completed.");
+            modifiedSite.setStatusTime(new Date());
+            modifiedSite.setUrl(site.getUrl());
+            modifiedSite.setName(site.getName());
+            modifiedSites.add(modifiedSite);
+        }
+        modifiedSites.forEach(siteService::saveSite);
+        return modifiedSites;
     }
-}
-    
-
-
-    
-
-
-
-
-
-
-
-
-@Transactional
-private List<Site> modifyAndSaveSites(List<Site> sites) {
-    List<Site> modifiedSites = new ArrayList<>();
-    
-    for (Site site : sites) {
-        Site modifiedSite = new Site();
-        modifiedSite.setStatus(Status.INDEXING);
-        modifiedSite.setStatusTime(new Date());
-        modifiedSite.setUrl(site.getUrl());
-        modifiedSite.setName(site.getName()); // Пример модификации
-        
-        modifiedSites.add(modifiedSite);
-    }
-    
-    // Сохраняем модифицированные сайты по одному
-    for (Site modifiedSite : modifiedSites) {
-        siteService.saveSite(modifiedSite);
-    }
-    
-    return modifiedSites;
-}
-
-
 
     private void stopIndexingService() {
         isIndexingInProgress = false;
+    }
+
+    private boolean isValidUrl(String url) {
+        return url.startsWith("http://") || url.startsWith("https://");
     }
 }
