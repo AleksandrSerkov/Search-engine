@@ -41,36 +41,38 @@ public class ApiController {
 
     private static final Logger logger = LoggerFactory.getLogger(ApiController.class);
 
-    public ApiController(StatisticsService statisticsService, IndexingService indexingService, SiteService siteService, SiteRepository siteRepository, SitesList sitesList) {
+    public ApiController(StatisticsService statisticsService, IndexingService indexingService, 
+                         SiteService siteService, SiteRepository siteRepository, SitesList sitesList) {
         this.statisticsService = statisticsService;
         this.indexingService = indexingService;
         this.siteService = siteService;
         this.siteRepository = siteRepository;
         this.sitesList = sitesList;
     }
+
     @GetMapping(value = "/statistics", produces = "application/json")
     public ResponseEntity<StatisticsResponse> statistics() {
         try {
             StatisticsResponse response = statisticsService.getStatistics();
-            logger.info("Отправка статистики: {}", response);
+            logger.info("Sending statistics: {}", response);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
-            logger.error("Ошибка при получении статистики", e);
+            logger.error("Error fetching statistics", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(null);
         }
     }
-    @PostMapping(value = "/statistics", produces = "application/json")
-public ResponseEntity<StatisticsResponse> statisticsPost() {
-    try {
-        StatisticsResponse response = statisticsService.getStatistics();
-        logger.info("Отправка статистики через POST-запрос: {}", response);
-        return ResponseEntity.ok(response);
-    } catch (Exception e) {
-        logger.error("Ошибка при получении статистики через POST-запрос", e);
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(null);
-    }
-}
 
+    @PostMapping(value = "/statistics", produces = "application/json")
+    public ResponseEntity<StatisticsResponse> statisticsPost() {
+        try {
+            StatisticsResponse response = statisticsService.getStatistics();
+            logger.info("Sending statistics via POST: {}", response);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            logger.error("Error fetching statistics via POST", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(null);
+        }
+    }
 
     @PostMapping(value = "/indexPage", produces = "application/json")
     public ResponseEntity<Map<String, Object>> indexPage(@RequestParam String url) {
@@ -86,7 +88,7 @@ public ResponseEntity<StatisticsResponse> statisticsPost() {
             siteService.saveSite(site);
             indexingService.processSitePages(site, url);
         } catch (Exception e) {
-            logger.error("Ошибка при индексации страницы", e);
+            logger.error("Error indexing page", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of("result", false, "error", "Error while indexing the page"));
         }
