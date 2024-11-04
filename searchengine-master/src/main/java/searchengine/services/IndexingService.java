@@ -1,6 +1,5 @@
 package searchengine.services;
 import java.io.IOException;
-import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
 import java.sql.Timestamp;
 import java.util.ArrayList;
@@ -21,8 +20,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
-
-import com.fasterxml.jackson.dataformat.xml.XmlMapper;
 
 import searchengine.config.SitesList;
 import searchengine.entity.Index;
@@ -198,11 +195,7 @@ public class IndexingService {
         }
     }
     
-    private String toXml(String content, XmlMapper xmlMapper) throws IOException {
-        StringWriter writer = new StringWriter();
-        xmlMapper.writeValue(writer, content);
-        return writer.toString();
-    }
+  
 
 
 

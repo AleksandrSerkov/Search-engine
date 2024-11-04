@@ -1,5 +1,7 @@
 
 package searchengine.controllers;
+
+
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
@@ -28,6 +30,7 @@ import searchengine.repository.SiteRepository;
 import searchengine.services.IndexingService;
 import searchengine.services.SiteService;
 import searchengine.services.StatisticsService;
+
 @RestController
 @RequestMapping("/api")
 public class ApiController {
@@ -62,18 +65,6 @@ public class ApiController {
         }
     }
 
-    @PostMapping(value = "/statistics", produces = "application/json")
-    public ResponseEntity<StatisticsResponse> statisticsPost() {
-        try {
-            StatisticsResponse response = statisticsService.getStatistics();
-            logger.info("Sending statistics via POST: {}", response);
-            return ResponseEntity.ok(response);
-        } catch (Exception e) {
-            logger.error("Error fetching statistics via POST", e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(null);
-        }
-    }
-
     @PostMapping(value = "/indexPage", produces = "application/json")
     public ResponseEntity<Map<String, Object>> indexPage(@RequestParam String url) {
         if (!isValidUrl(url)) {
@@ -85,6 +76,7 @@ public class ApiController {
             Site site = new Site();
             site.setUrl(url);
             site.setName("New Site");
+            site.setStatus(Status.INDEXING);  // Присваиваем статус INDEXING
             siteService.saveSite(site);
             indexingService.processSitePages(site, url);
         } catch (Exception e) {
@@ -108,17 +100,6 @@ public class ApiController {
         return ResponseEntity.ok(Map.of("result", true, "message", "Indexing started"));
     }
 
-    @GetMapping(value = "/stopIndexing", produces = "application/json")
-    public synchronized ResponseEntity<Map<String, Object>> stopIndexing() {
-        if (!isIndexingInProgress) {
-            return ResponseEntity.badRequest()
-                    .body(Map.of("result", false, "error", "Indexing is not in progress"));
-        }
-
-        stopIndexingService();
-        return ResponseEntity.ok(Map.of("result", true, "message", "Indexing stopped"));
-    }
-
     @Async
     @Transactional
     public CompletableFuture<ResponseEntity<Map<String, Object>>> startIndexingService() {
@@ -137,7 +118,7 @@ public class ApiController {
                             Site site = new Site();
                             site.setUrl(siteConfig.getUrl());
                             site.setName(siteConfig.getName());
-                            site.setStatus(Status.INDEXED);
+                            site.setStatus(Status.INDEXED); // Присваиваем статус INDEXED
                             return site;
                         })
                         .collect(Collectors.toList());
@@ -155,7 +136,7 @@ public class ApiController {
             List<Site> modifiedSites = modifyAndSaveSites(sitesInDatabase);
             if (!modifiedSites.isEmpty()) {
                 modifiedSites.forEach(modifiedSite -> {
-                    modifiedSite.setStatus(Status.INDEXING);
+                    modifiedSite.setStatus(Status.INDEXING);  // Присваиваем статус INDEXING перед обработкой
                     siteService.saveSite(modifiedSite);
                     indexingService.processSitePages(modifiedSite, modifiedSite.getUrl());
                 });
@@ -184,7 +165,7 @@ public class ApiController {
         List<Site> modifiedSites = new ArrayList<>();
         for (Site site : sites) {
             Site modifiedSite = new Site();
-            modifiedSite.setStatus(Status.INDEXING);
+            modifiedSite.setStatus(Status.INDEXING);  // Устанавливаем статус INDEXING для всех
             modifiedSite.setStatusTime(new Date());
             modifiedSite.setUrl(site.getUrl());
             modifiedSite.setName(site.getName());
@@ -194,11 +175,11 @@ public class ApiController {
         return modifiedSites;
     }
 
-    private void stopIndexingService() {
-        isIndexingInProgress = false;
-    }
-
     private boolean isValidUrl(String url) {
         return url.startsWith("http://") || url.startsWith("https://");
+    }
+
+    private void stopIndexingService() {
+        isIndexingInProgress = false;
     }
 }

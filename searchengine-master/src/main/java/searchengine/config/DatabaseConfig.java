@@ -22,12 +22,14 @@ import org.springframework.orm.jpa.vendor.HibernateJpaVendorAdapter;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.EnableTransactionManagement;
 
-import com.fasterxml.jackson.dataformat.xml.XmlMapper;
+
 @Configuration
 @EnableTransactionManagement
 @EntityScan(basePackages = "searchengine.entity")
 @EnableJpaRepositories(basePackages = "searchengine.repository")
+
 public class DatabaseConfig {
+
 
     @Bean
     public DataSource dataSource(DataSourceProperties dataSourceProperties) {
@@ -51,10 +53,7 @@ public class DatabaseConfig {
     
         return entityManagerFactoryBean;
     }
-    @Bean
-    public XmlMapper xmlMapper() {
-        return new XmlMapper();
-    }
+    
     @Bean
     public PlatformTransactionManager transactionManager(DataSource dataSource) {
         return new DataSourceTransactionManager(dataSource);
