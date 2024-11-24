@@ -1,7 +1,5 @@
 
 package searchengine.controllers;
-
-
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
@@ -24,10 +22,12 @@ import org.springframework.web.bind.annotation.RestController;
 
 import searchengine.config.SitesList;
 import searchengine.dto.statistics.StatisticsResponse;
+import searchengine.entity.Lemma;
 import searchengine.entity.Site;
 import searchengine.model.Status;
 import searchengine.repository.SiteRepository;
 import searchengine.services.IndexingService;
+import searchengine.services.LemmaService;
 import searchengine.services.SiteService;
 import searchengine.services.StatisticsService;
 
@@ -41,16 +41,32 @@ public class ApiController {
     private final SiteRepository siteRepository;
     private final SitesList sitesList;
     private boolean isIndexingInProgress = false;
-
+    private final LemmaService lemmaService;
     private static final Logger logger = LoggerFactory.getLogger(ApiController.class);
 
     public ApiController(StatisticsService statisticsService, IndexingService indexingService, 
-                         SiteService siteService, SiteRepository siteRepository, SitesList sitesList) {
+                         SiteService siteService, SiteRepository siteRepository, SitesList sitesList,LemmaService lemmaService) {
         this.statisticsService = statisticsService;
         this.indexingService = indexingService;
         this.siteService = siteService;
         this.siteRepository = siteRepository;
         this.sitesList = sitesList;
+        this.lemmaService=lemmaService;
+    }
+    @PostMapping(value = "/saveLemma", produces = "application/json")
+    public ResponseEntity<Map<String, Object>> saveLemma(@RequestParam String lemmaText, @RequestParam int siteId) {
+        try {
+            Lemma savedLemma = lemmaService.saveLemma(lemmaText, siteId);
+            logger.info("Lemma saved successfully: {}", savedLemma);
+            return ResponseEntity.ok(Map.of("result", true, "lemma", savedLemma));
+        } catch (IllegalArgumentException e) {
+            logger.error("Error saving lemma: ", e);
+            return ResponseEntity.badRequest().body(Map.of("result", false, "error", e.getMessage()));
+        } catch (Exception e) {
+            logger.error("Unexpected error while saving lemma: ", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("result", false, "error", "Unexpected error occurred"));
+        }
     }
 
     @GetMapping(value = "/statistics", produces = "application/json")
@@ -182,4 +198,5 @@ public class ApiController {
     private void stopIndexingService() {
         isIndexingInProgress = false;
     }
+
 }
