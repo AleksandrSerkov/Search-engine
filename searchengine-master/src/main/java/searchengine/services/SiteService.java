@@ -18,6 +18,30 @@ public class SiteService {
         this.siteRepository = siteRepository;
         this.siteConfig = siteConfig;
     }
+    // Проверить, проиндексирован ли сайт
+public boolean isSiteIndexed(String siteUrl) {
+    if (siteUrl == null || siteUrl.isEmpty()) {
+        return siteRepository.existsByStatus(searchengine.model.Status.INDEXED);
+    }
+    return siteRepository.existsByUrlAndStatus(siteUrl, searchengine.model.Status.INDEXED);
+}
+
+// Найти сайт по URL
+public Site findSiteByUrl(String siteUrl) {
+    return siteRepository.findByUrl(siteUrl)
+            .orElseThrow(() -> new IllegalArgumentException("Сайт с URL " + siteUrl + " не найден"));
+}
+
+// Удалить сайт из базы данных
+public void deleteSite(Site site) {
+    siteRepository.delete(site);
+}
+
+// Очистить все сайты из базы данных
+public void clearAllSites() {
+    siteRepository.deleteAll();
+}
+
 
     // Сохранить объект currentSite в базе данных
     public void saveSite(Site currentSite) {
@@ -34,5 +58,6 @@ public class SiteService {
         for (Site site : sitesFromYaml) {
             saveSite(site);
         }
+        
     }
 }

@@ -18,7 +18,7 @@ public class Lemma {
     private int id;
 
     @ManyToOne
-    @JoinColumn(name = "siteid", nullable = false)
+    @JoinColumn(name = "siteid", nullable = true)
     private Site site;
 
     @Column(name = "lemma_text", nullable = false)
