@@ -55,43 +55,35 @@ public class ApiController {
         this.sitesList = sitesList;
         this.lemmaService=lemmaService;
     }
-    @GetMapping(value = "/search", produces = "application/json")
-public ResponseEntity<Map<String, Object>> search(
-        @RequestParam String query,
-        @RequestParam(required = false) String site,
-        @RequestParam(defaultValue = "0") int offset,
-        @RequestParam(defaultValue = "20") int limit) {
-    try {
+    @GetMapping("/search")
+    public ResponseEntity<Map<String, Object>> search(@RequestParam String query, 
+                                                      @RequestParam(required = false) String site, 
+                                                      @RequestParam(defaultValue = "0") int offset, 
+                                                      @RequestParam(defaultValue = "10") int limit) {
         if (query == null || query.trim().isEmpty()) {
             return ResponseEntity.badRequest()
-                    .body(Map.of("result", false, "error", "Задан пустой поисковый запрос"));
+                    .body(Map.of("result", false, "error", "Поисковый запрос не может быть пустым"));
         }
 
-        // Проверка индексации
-        boolean isIndexed = siteService.isSiteIndexed(site);
-        if (!isIndexed) {
+        if (site != null && !siteService.isSiteIndexed(site)) {
             return ResponseEntity.badRequest()
                     .body(Map.of("result", false, "error", "Сайт не проиндексирован"));
         }
 
-        // Получаем результаты поиска
-        List<SearchResult> searchResults = indexingService.search(query, site, offset, limit);
-        int totalResults = indexingService.countSearchResults(query, site);
-
-        // Формируем ответ
-        Map<String, Object> response = Map.of(
-                "result", true,
-                "count", totalResults,
-                "data", searchResults
-        );
-        return ResponseEntity.ok(response);
-
-    } catch (Exception e) {
-        logger.error("Error during search", e);
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(Map.of("result", false, "error", "Ошибка выполнения поиска"));
+        try {
+            List<SearchResult> searchResults = indexingService.search(query, site, offset, limit);
+            int totalResults = indexingService.countSearchResults(query, site);
+            return ResponseEntity.ok(Map.of(
+                    "result", true,
+                    "data", searchResults,
+                    "count", totalResults
+            ));
+        } catch (Exception e) {
+            logger.error("Ошибка при выполнении поиска", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("result", false, "error", "Ошибка выполнения поиска"));
+        }
     }
-}
 
     @PostMapping(value = "/saveLemma", produces = "application/json")
     public ResponseEntity<Map<String, Object>> saveLemma(@RequestParam String lemmaText, @RequestParam int siteId) {
@@ -121,40 +113,50 @@ public ResponseEntity<Map<String, Object>> search(
         }
     }
 
-    @PostMapping(value = "/indexPage", produces = "application/json")
+    @PostMapping("/indexPage")
     public ResponseEntity<Map<String, Object>> indexPage(@RequestParam String url) {
-        if (!isValidUrl(url)) {
-            logger.warn("Invalid URL: {}", url);
-            return ResponseEntity.badRequest().body(Map.of("result", false, "error", "Invalid URL"));
+        if (url == null || url.trim().isEmpty()) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("result", false, "error", "URL не может быть пустым"));
         }
-
+        
         try {
             Site site = new Site();
             site.setUrl(url);
             site.setName("New Site");
-            site.setStatus(Status.INDEXING);  // Присваиваем статус INDEXING
+            site.setStatus(Status.INDEXING);
             siteService.saveSite(site);
             indexingService.processSitePages(site, url);
+            return ResponseEntity.ok(Map.of("result", true, "message", "Индексация страницы запущена"));
         } catch (Exception e) {
-            logger.error("Error indexing page", e);
+            logger.error("Ошибка при индексации страницы", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Map.of("result", false, "error", "Error while indexing the page"));
+                    .body(Map.of("result", false, "error", "Ошибка индексации страницы"));
         }
-
-        return ResponseEntity.ok(Map.of("result", true));
     }
 
-    @GetMapping(value = "/startIndexing", produces = "application/json")
-    public synchronized ResponseEntity<Map<String, Object>> startIndexing() {
-        if (isIndexingInProgress) {
-            return ResponseEntity.badRequest()
-                    .body(Map.of("result", false, "error", "Indexing is already in progress"));
-        }
-
-        isIndexingInProgress = true;
-        startIndexingService().thenAccept(result -> logger.info("Indexing completed"));
-        return ResponseEntity.ok(Map.of("result", true, "message", "Indexing started"));
+    @GetMapping("/startIndexing")
+public synchronized ResponseEntity<Map<String, Object>> startIndexing() {
+    if (isIndexingInProgress) {
+        return ResponseEntity.badRequest()
+                .body(Map.of("result", false, "error", "Индексация уже выполняется"));
     }
+
+    isIndexingInProgress = true;
+    CompletableFuture.runAsync(() -> {
+        try {
+            List<Site> sites = siteService.getAllSites();
+            indexingService.startIndexing(sites);
+            logger.info("Индексация завершена");
+        } catch (Exception e) {
+            logger.error("Ошибка индексации", e);
+        } finally {
+            isIndexingInProgress = false;
+        }
+    });
+    
+    return ResponseEntity.ok(Map.of("result", true, "message", "Индексация запущена"));
+}
 
     @Async
 @Transactional

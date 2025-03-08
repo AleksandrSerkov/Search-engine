@@ -95,29 +95,49 @@ public class IndexingService {
             }
         });
     }
-
     public List<SearchResult> search(String query, String site, int offset, int limit) {
         if (query == null || query.trim().isEmpty()) {
             throw new IllegalArgumentException("Поисковый запрос не может быть пустым");
         }
-
+    
         List<String> lemmas = extractLemmas(query);
         if (lemmas.isEmpty()) {
             return Collections.emptyList();
         }
-
+    
         Optional<Site> siteEntity = Optional.empty();
         if (site != null && !site.isEmpty()) {
-            siteEntity = siteRepository.findByUrl(site);
-            if (siteEntity.isEmpty()) {
-                throw new IllegalArgumentException("Сайт с URL " + site + " не найден");
+            try {
+                // Сначала пробуем интерпретировать как ID
+                int siteId = Integer.parseInt(site);
+                siteEntity = siteRepository.findById(Integer.valueOf(siteId));
+                if (siteEntity.isEmpty()) {
+                    throw new IllegalArgumentException("Сайт с id " + site + " не найден");
+                }
+            } catch (NumberFormatException e) {
+                // Если не получилось как ID, ищем по URL
+                logger.info("Поиск сайта по URL: {}", site);
+                List<Site> sites = siteRepository.findAll();
+                for (Site s : sites) {
+                    if (site.equals(s.getUrl()) || 
+                        site.equals(s.getUrl().replaceAll("/$", "")) || 
+                        (site + "/").equals(s.getUrl())) {
+                        siteEntity = Optional.of(s);
+                        logger.info("Найден сайт по URL: {}, ID: {}", site, s.getId());
+                        break;
+                    }
+                }
+                
+                if (siteEntity.isEmpty()) {
+                    throw new IllegalArgumentException("Сайт с URL " + site + " не найден");
+                }
             }
         }
-
+    
         List<Page> pages = siteEntity.isPresent()
                 ? pageRepository.findPagesByLemmasAndSite(lemmas, siteEntity.get().getId())
                 : pageRepository.findPagesByLemmas(lemmas);
-
+    
         List<SearchResult> results = calculateRelevance(pages, lemmas);
         return results.stream()
                 .sorted(Comparator.comparingDouble(SearchResult::getRelevance).reversed())
@@ -125,7 +145,7 @@ public class IndexingService {
                 .limit(limit)
                 .collect(Collectors.toList());
     }
-
+    
     public int countSearchResults(String query, String site) {
         if (query == null || query.trim().isEmpty()) {
             return 0;
@@ -138,18 +158,34 @@ public class IndexingService {
     
         Optional<Site> siteEntity = Optional.empty();
         if (site != null && !site.isEmpty()) {
-            siteEntity = siteRepository.findByUrl(site);
+            try {
+                // Сначала пробуем интерпретировать как ID
+                int siteId = Integer.parseInt(site);
+                siteEntity = siteRepository.findById(Integer.valueOf(siteId));
+            } catch (NumberFormatException e) {
+                // Если не получилось как ID, ищем по URL
+                logger.info("Поиск сайта по URL для подсчета результатов: {}", site);
+                List<Site> sites = siteRepository.findAll();
+                for (Site s : sites) {
+                    if (site.equals(s.getUrl()) || 
+                        site.equals(s.getUrl().replaceAll("/$", "")) || 
+                        (site + "/").equals(s.getUrl())) {
+                        siteEntity = Optional.of(s);
+                        logger.info("Найден сайт по URL: {}, ID: {}", site, s.getId());
+                        break;
+                    }
+                }
+            }
             if (siteEntity.isEmpty()) {
                 return 0;
             }
         }
     
-        // Теперь, если сайт найден, используем метод countPagesByLemmasAndSite,
-        // если не найден — countPagesByLemmas
         return siteEntity.isPresent()
                 ? pageRepository.findPagesByLemmasAndSite(lemmas, siteEntity.get().getId()).size()
                 : pageRepository.findPagesByLemmas(lemmas).size();
     }
+    
 
     private List<String> extractLemmas(String query) {
         return Arrays.stream(query.split("\\s+"))
@@ -257,7 +293,8 @@ private int countOccurrences(String content, String lemma) {
         index += lemma.length();  // Пропускаем уже найденную лемму
     }
     return count;
-}public void processSitePages(Site site, String url) throws IOException {
+}
+public void processSitePages(Site site, String url) throws IOException {
     // Проверяем входные параметры
     if (site == null || url == null || url.isEmpty()) {
         logger.error("Ошибка: site или URL не могут быть null или пустыми. site: {}, url: {}", site, url);
@@ -311,34 +348,53 @@ private int countOccurrences(String content, String lemma) {
 
 @Transactional
 private void processLemmaAndIndex(Page savedPage, String lemma, String content) {
-    // Проверяем, существует ли лемма в базе
-    Lemma lemmaEntity = lemmaRepository.findByLemmaText(lemma);
-    if (lemmaEntity == null) {
-        // Если лемма не найдена, создаём и сохраняем новую
-        lemmaEntity = new Lemma();
-        lemmaEntity.setLemmaText(lemma);
-        lemmaEntity = lemmaRepository.save(lemmaEntity); // Сохраняем и сразу получаем сохранённый объект
-    }
+    logger.info("processLemmaAndIndex started for pageId: {}, lemma: {}", savedPage.getId(), lemma);
+    try {
+        // Проверяем, существует ли лемма в базе
+        Lemma lemmaEntity = lemmaRepository.findByLemmaText(lemma);
+        if (lemmaEntity == null) {
+            // Если лемма не найдена, создаём и сохраняем новую
+            lemmaEntity = new Lemma();
+            lemmaEntity.setLemmaText(lemma);
+            lemmaEntity.setSite(savedPage.getSite()); // Добавляем site
+            lemmaEntity.setFrequency(0); // Добавляем frequency
+            lemmaEntity = lemmaRepository.save(lemmaEntity); // Сохраняем и сразу получаем сохранённый объект
+            logger.info("Lemma saved: {}", lemmaEntity);
+        } else {
+            // Увеличиваем частоту, если лемма уже существует
+            lemmaEntity.setFrequency(lemmaEntity.getFrequency() + 1);
+            lemmaEntity = lemmaRepository.save(lemmaEntity);
+            logger.info("Lemma updated: {}", lemmaEntity);
+        }
 
-    // Преобразуем pageId в String
-    String pageIdString = String.valueOf(savedPage.getId());
+        // Проверяем, существует ли уже индекс с таким pageId и lemma
+        Index existingIndex = indexRepository.findByPageIdAndLemma(savedPage.getId(), lemma);
 
-    // Проверяем, существует ли уже индекс с таким pageId и lemma
-    Index existingIndex = indexRepository.findByPageIdAndLemma(pageIdString, lemma);
-    
-    // Если индекс не найден, создаем новый
-    if (existingIndex == null) {
-        // Создаем индекс для страницы и леммы
-        Index index = new Index();
-        index.setPageId(savedPage.getId()); // Используем ID страницы
-        index.setLemma(lemmaEntity.getLemmaText()); // Используем текст леммы
-        index.setRank(calculateRank(content, lemma)); // Метод для расчета ранга
-        indexRepository.save(index);
-    } else {
-        // Если индекс найден, обновляем его (если нужно)
-        existingIndex.setRank(calculateRank(content, lemma));
-        indexRepository.save(existingIndex);
+        // Если индекс не найден, создаем новый
+        if (existingIndex == null) {
+            // Создаем индекс для страницы и леммы
+            Index index = new Index();
+            index.setPageId(savedPage.getId()); // Используем ID страницы
+            index.setLemma(lemmaEntity.getLemmaText()); // Используем текст леммы
+            index.setLemmaId(lemmaEntity.getId()); // Устанавливаем ID леммы - это ключевое исправление
+            index.setRank(calculateRank(content, lemma)); // Метод для расчета ранга
+            indexRepository.save(index);
+            logger.info("Index saved: {}", index);
+        } else {
+            // Если индекс найден, обновляем его (если нужно)
+            existingIndex.setRank(calculateRank(content, lemma));
+            // Убедимся, что lemmaId установлен
+            if (existingIndex.getLemmaId() == null) {
+                existingIndex.setLemmaId(lemmaEntity.getId());
+            }
+            indexRepository.save(existingIndex);
+            logger.info("Index updated: {}", existingIndex);
+        }
+    } catch (Exception e) {
+        logger.error("Error in processLemmaAndIndex for pageId: {}, lemma: {}", savedPage.getId(), lemma, e);
+        throw new RuntimeException("Error in processLemmaAndIndex", e);
     }
+    logger.info("processLemmaAndIndex finished for pageId: {}, lemma: {}", savedPage.getId(), lemma);
 }
 
 
