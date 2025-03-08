@@ -11,20 +11,23 @@ import searchengine.entity.Page;
 
 @Repository
 public interface PageRepository extends JpaRepository<Page, Integer> {
-    @Query(value = "SELECT p.lemma_rank FROM page p WHERE p.id = :id AND p.lemma = :lemma", nativeQuery = true)
+    
+    @Query(value = "SELECT i.level FROM idx i " +
+                   "WHERE i.page_id = :id AND i.lemma = :lemma", nativeQuery = true)
     double findLemmaRank(@Param("id") Integer id, @Param("lemma") String lemma);
 
-    
+    // Поиск страниц по леммам и сайту (без связей, используя ID)
+    @Query("SELECT p FROM Page p " +
+           "WHERE p.site.id = :siteId AND p.id IN " +
+           "(SELECT i.pageId FROM Index i WHERE i.lemma IN :lemmas)")
+    List<Page> findPagesByLemmasAndSite(@Param("lemmas") List<String> lemmas, @Param("siteId") int siteId);
 
-    // Поиск страниц по леммам и сайту
-    @Query("SELECT p FROM Page p JOIN p.lemmas l WHERE p.site.id = :siteId AND l.lemmaText IN :lemmas")
-List<Page> findPagesByLemmasAndSite(@Param("lemmas") List<String> lemmas, @Param("siteId") int siteId);
-
-
-
-    // Поиск страниц по леммам
-    @Query("SELECT p FROM Page p JOIN p.lemmas l WHERE l.lemmaText IN :lemmas")
-List<Page> findPagesByLemmas(@Param("lemmas") List<String> lemmas);
+    // Поиск страниц по леммам (без связей, используя ID)
+    @Query("SELECT p FROM Page p " +
+           "WHERE p.id IN (SELECT i.pageId FROM Index i WHERE i.lemma IN :lemmas)")
+    List<Page> findPagesByLemmas(@Param("lemmas") List<String> lemmas);
 }
+
+
 
 

@@ -1,11 +1,11 @@
 
 package searchengine.controllers;
+
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Date;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
@@ -14,7 +14,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.scheduling.annotation.Async;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -47,19 +46,25 @@ public class ApiController {
     private static final Logger logger = LoggerFactory.getLogger(ApiController.class);
 
     public ApiController(StatisticsService statisticsService, IndexingService indexingService, 
-                         SiteService siteService, SiteRepository siteRepository, SitesList sitesList,LemmaService lemmaService) {
+                         SiteService siteService, SiteRepository siteRepository, 
+                         SitesList sitesList, LemmaService lemmaService) {
         this.statisticsService = statisticsService;
         this.indexingService = indexingService;
         this.siteService = siteService;
         this.siteRepository = siteRepository;
         this.sitesList = sitesList;
-        this.lemmaService=lemmaService;
+        this.lemmaService = lemmaService;
     }
+    
     @GetMapping("/search")
-    public ResponseEntity<Map<String, Object>> search(@RequestParam String query, 
-                                                      @RequestParam(required = false) String site, 
-                                                      @RequestParam(defaultValue = "0") int offset, 
-                                                      @RequestParam(defaultValue = "10") int limit) {
+    public ResponseEntity<Map<String, Object>> search(
+            @RequestParam String query,
+            @RequestParam(required = false) String site,
+            @RequestParam(defaultValue = "0") int offset,
+            @RequestParam(defaultValue = "10") int limit) {
+
+        logger.info("Поисковый запрос: '{}', Сайт: '{}', Offset: {}, Limit: {}", query, site, offset, limit);
+
         if (query == null || query.trim().isEmpty()) {
             return ResponseEntity.badRequest()
                     .body(Map.of("result", false, "error", "Поисковый запрос не может быть пустым"));
@@ -73,17 +78,40 @@ public class ApiController {
         try {
             List<SearchResult> searchResults = indexingService.search(query, site, offset, limit);
             int totalResults = indexingService.countSearchResults(query, site);
+
+            logger.info("Найдено результатов: {}", totalResults);
+
             return ResponseEntity.ok(Map.of(
                     "result", true,
-                    "data", searchResults,
-                    "count", totalResults
+                    "count", totalResults,
+                    "data", searchResults
             ));
         } catch (Exception e) {
-            logger.error("Ошибка при выполнении поиска", e);
+            logger.error("Ошибка при выполнении поиска: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of("result", false, "error", "Ошибка выполнения поиска"));
         }
     }
+
+    /**
+     * Разбивает поисковый запрос на отдельные леммы (слова),
+     * приводя их к нижнему регистру и исключая короткие слова.
+     *
+     * @param query поисковый запрос
+     * @return список лемм
+     */
+    private List<String> extractLemmas(String query) {
+        return Arrays.stream(query.split("\\s+"))
+                .map(String::toLowerCase)
+                .distinct()
+                .filter(word -> word.length() > 2)
+                .collect(Collectors.toList());
+    }
+
+
+
+
+
 
     @PostMapping(value = "/saveLemma", produces = "application/json")
     public ResponseEntity<Map<String, Object>> saveLemma(@RequestParam String lemmaText, @RequestParam int siteId) {

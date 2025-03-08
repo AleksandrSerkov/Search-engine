@@ -38,7 +38,7 @@ public class Page {
 
     @ManyToMany
     @JoinTable(
-        name = "page_lemma", 
+        name = "idx", 
         joinColumns = @JoinColumn(name = "page_id"), 
         inverseJoinColumns = @JoinColumn(name = "lemma_id")
     )
