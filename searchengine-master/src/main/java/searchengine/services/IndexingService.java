@@ -1,424 +1,169 @@
 package searchengine.services;
 
 import java.io.IOException;
-import java.sql.Timestamp;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.HashMap;
+import java.net.SocketTimeoutException;
 import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
-import java.util.stream.Collectors;
+import java.util.concurrent.TimeUnit;
 
-import org.jsoup.Connection;
-import org.jsoup.Jsoup;
-import org.jsoup.nodes.Document;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
-import jakarta.transaction.Transactional;
-import searchengine.config.SitesList;
-import searchengine.entity.Index;
-import searchengine.entity.Lemma;
-import searchengine.entity.Page;
 import searchengine.entity.Site;
-import searchengine.model.SearchResult;
 import searchengine.model.Status;
-import searchengine.repository.IndexRepository;
-import searchengine.repository.LemmaRepository;
-import searchengine.repository.PageRepository;
-import searchengine.repository.SiteRepository;
 
 @Service
 public class IndexingService {
 
     private static final Logger logger = LoggerFactory.getLogger(IndexingService.class);
 
-    private final SiteRepository siteRepository;
-    private final PageRepository pageRepository;
-    private final LemmaRepository lemmaRepository;
-    private final IndexRepository indexRepository;
-
-    @Autowired
-    private SitesList sitesList;
-
-    @Autowired
-    private PageService pageService;
-
     @Autowired
     private SiteService siteService;
 
     @Autowired
-    public IndexingService(SiteRepository siteRepository, PageRepository pageRepository,
-                           LemmaRepository lemmaRepository, IndexRepository indexRepository) {
-        this.siteRepository = siteRepository;
-        this.pageRepository = pageRepository;
-        this.lemmaRepository = lemmaRepository;
-        this.indexRepository = indexRepository;
-    }
+    private PageService pageService;
 
-    private boolean isIndexingInProgress = false;
-
-    @Async
-    public CompletableFuture<Void> startIndexing(List<Site> sites) {
-        logger.info("Starting indexing process...");
-        if (sites == null || sites.isEmpty()) {
-            logger.warn("No sites found in configuration.");
-            return CompletableFuture.completedFuture(null);
-        }
+    /**
+     * Запускает процесс индексации для всех сайтов, полученных из базы.
+     * При возникновении ошибок выбрасываются исключения с подробной информацией.
+     */
+    @Async("taskExecutor")
+    @Transactional
+    public CompletableFuture<Void> startIndexing() {
+        logger.info("Запуск процесса индексации...");
 
         return CompletableFuture.runAsync(() -> {
             try {
-                sites.stream()
-                    .map(this::createNewSiteEntry)
-                    .filter(Objects::nonNull)
-                    .forEach(modifiedSite -> {
-                        try {
-                            String url = modifiedSite.getUrl();
-                            processSitePages(modifiedSite, url);
-                            pageService.indexPage(url);
-                            updateSiteStatus(modifiedSite, Status.INDEXED);
-                        } catch (IOException e) {
-                            logger.error("Error indexing page: {}", modifiedSite.getUrl(), e);
-                        }
-                    });
+                List<Site> sites = siteService.getAllSites();
+                if (sites == null || sites.isEmpty()) {
+                    String errMsg = "В базе данных не найдено сайтов.";
+                    logger.error(errMsg);
+                    throw new RuntimeException(errMsg);
+                }
+                logger.info("Обнаружено {} сайтов в базе данных.", sites.size());
+
+                // Обрабатываем каждый сайт
+                for (Site site : sites) {
+                    try {
+                        logger.info("Начинаем обработку сайта: {} (ID: {})", site.getUrl(), site.getId());
+                        processSite(site); // Логика индексации для сайта
+                    } catch (Exception e) {
+                        logger.error("Ошибка при обработке сайта {}: {}", site.getUrl(), e.toString(), e);
+                        siteService.updateSiteStatus(site, Status.FAILED);
+                        siteService.updateSiteLastError(site, "Ошибка обработки: " + e.getMessage());
+                        siteService.saveOrUpdateSite(site);
+                        // Передаем подробное сообщение об ошибке пользователю
+                        throw new RuntimeException("Ошибка при обработке сайта " + site.getUrl() + ": " + e.getMessage(), e);
+                    }
+                }
+                logger.info("Процесс индексации завершен.");
             } catch (Exception e) {
-                logger.error("Error during indexing process", e);
-            } finally {
-                logger.info("Indexing process completed.");
+                logger.error("Ошибка при индексации: {}", e.getMessage(), e);
+                throw new RuntimeException("Ошибка при индексации: " + e.getMessage(), e);
             }
         });
     }
-    public List<SearchResult> search(String query, String site, int offset, int limit) {
-        if (query == null || query.trim().isEmpty()) {
-            throw new IllegalArgumentException("Поисковый запрос не может быть пустым");
-        }
-    
-        List<String> lemmas = extractLemmas(query);
-        if (lemmas.isEmpty()) {
-            return Collections.emptyList();
-        }
-    
-        Optional<Site> siteEntity = Optional.empty();
-        if (site != null && !site.isEmpty()) {
+
+    /**
+     * Индексирует конкретный сайт: обновляет статус, обрабатывает страницы.
+     * При ошибках выбрасывается исключение с подробным сообщением.
+     */
+    @Transactional
+    public void processSite(Site site) throws IOException {
+        logger.info("Начата индексация сайта: {} (ID: {})", site.getUrl(), site.getId());
+
+        int attempts = 0;
+        boolean success = false;
+        while (attempts < 3 && !success) {
             try {
-                // Сначала пробуем интерпретировать как ID
-                int siteId = Integer.parseInt(site);
-                siteEntity = siteRepository.findById(Integer.valueOf(siteId));
-                if (siteEntity.isEmpty()) {
-                    throw new IllegalArgumentException("Сайт с id " + site + " не найден");
+                attempts++;
+
+                // Устанавливаем статус INDEXING и сохраняем
+                siteService.updateSiteStatus(site, Status.INDEXING);
+                siteService.saveOrUpdateSite(site);
+
+                // Пример: список URL страниц для индексирования (используем URL сайта)
+                List<String> pageUrls = List.of(site.getUrl());
+                for (String pageUrl : pageUrls) {
+                    logger.info("Индексируем страницу: {} для сайта: {}", pageUrl, site.getUrl());
+                    indexPage(pageUrl, site);
                 }
-            } catch (NumberFormatException e) {
-                // Если не получилось как ID, ищем по URL
-                logger.info("Поиск сайта по URL: {}", site);
-                List<Site> sites = siteRepository.findAll();
-                for (Site s : sites) {
-                    if (site.equals(s.getUrl()) || 
-                        site.equals(s.getUrl().replaceAll("/$", "")) || 
-                        (site + "/").equals(s.getUrl())) {
-                        siteEntity = Optional.of(s);
-                        logger.info("Найден сайт по URL: {}, ID: {}", site, s.getId());
-                        break;
-                    }
+
+                // После успешного индексирования обновляем статус на INDEXED
+                siteService.updateSiteStatus(site, Status.INDEXED);
+                siteService.saveOrUpdateSite(site);
+                logger.info("Сайт успешно проиндексирован: {}", site.getUrl());
+
+                success = true;  // Завершаем цикл при успешном выполнении
+
+            } catch (PessimisticLockingFailureException e) {
+                if (attempts >= 3) {
+                    logger.error("Ошибка при обработке сайта {}: {}", site.getUrl(), e.toString(), e);
+                    siteService.updateSiteStatus(site, Status.FAILED);
+                    siteService.updateSiteLastError(site, "Ошибка обработки: " + e.getMessage());
+                    siteService.saveOrUpdateSite(site);
+                    throw new IOException("Ошибка при обработке сайта " + site.getUrl() + ": " + e.getMessage(), e);
                 }
-                
-                if (siteEntity.isEmpty()) {
-                    throw new IllegalArgumentException("Сайт с URL " + site + " не найден");
+                logger.warn("Проблемы с блокировкой при обработке сайта {}. Попытка {}/3.", site.getUrl(), attempts);
+                try {
+                    TimeUnit.SECONDS.sleep(2);  // Задержка перед повторной попыткой
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                    throw new IOException("Индексация прервана.", ex);
                 }
+            } catch (Exception e) {
+                logger.error("Ошибка при обработке сайта {}: {}", site.getUrl(), e.toString(), e);
+                siteService.updateSiteStatus(site, Status.FAILED);
+                siteService.updateSiteLastError(site, "Ошибка обработки: " + e.getMessage());
+                siteService.saveOrUpdateSite(site);
+                throw new IOException("Ошибка при обработке сайта " + site.getUrl() + ": " + e.getMessage(), e);
             }
         }
-    
-        List<Page> pages = siteEntity.isPresent()
-                ? pageRepository.findPagesByLemmasAndSite(lemmas, siteEntity.get().getId())
-                : pageRepository.findPagesByLemmas(lemmas);
-    
-        List<SearchResult> results = calculateRelevance(pages, lemmas);
-        return results.stream()
-                .sorted(Comparator.comparingDouble(SearchResult::getRelevance).reversed())
-                .skip(offset)
-                .limit(limit)
-                .collect(Collectors.toList());
-    }
-    
-    public int countSearchResults(String query, String site) {
-        if (query == null || query.trim().isEmpty()) {
-            return 0;
-        }
-    
-        List<String> lemmas = extractLemmas(query);
-        if (lemmas.isEmpty()) {
-            return 0;
-        }
-    
-        Optional<Site> siteEntity = Optional.empty();
-        if (site != null && !site.isEmpty()) {
-            try {
-                // Сначала пробуем интерпретировать как ID
-                int siteId = Integer.parseInt(site);
-                siteEntity = siteRepository.findById(Integer.valueOf(siteId));
-            } catch (NumberFormatException e) {
-                // Если не получилось как ID, ищем по URL
-                logger.info("Поиск сайта по URL для подсчета результатов: {}", site);
-                List<Site> sites = siteRepository.findAll();
-                for (Site s : sites) {
-                    if (site.equals(s.getUrl()) || 
-                        site.equals(s.getUrl().replaceAll("/$", "")) || 
-                        (site + "/").equals(s.getUrl())) {
-                        siteEntity = Optional.of(s);
-                        logger.info("Найден сайт по URL: {}, ID: {}", site, s.getId());
-                        break;
-                    }
-                }
-            }
-            if (siteEntity.isEmpty()) {
-                return 0;
-            }
-        }
-    
-        return siteEntity.isPresent()
-                ? pageRepository.findPagesByLemmasAndSite(lemmas, siteEntity.get().getId()).size()
-                : pageRepository.findPagesByLemmas(lemmas).size();
-    }
-    
-
-    private List<String> extractLemmas(String query) {
-        return Arrays.stream(query.split("\\s+"))
-                .map(String::toLowerCase)
-                .distinct()
-                .filter(lemma -> lemma.length() > 2)
-                .collect(Collectors.toList());
-    }
-    private List<SearchResult> calculateRelevance(List<Page> pages, List<String> lemmas) {
-        // Вычисляем максимальную релевантность
-        double maxRelevance = pages.stream()
-                                   .mapToDouble(page -> calculatePageRelevance(page, lemmas))
-                                   .max()
-                                   .orElse(0); // если список страниц пустой, то maxRelevance будет 0
-       
-        Map<Page, Double> relevanceMap = new HashMap<>();
-    
-        // Заполняем карту с релевантностью
-        for (Page page : pages) {
-            double relevance = calculatePageRelevance(page, lemmas);
-            relevanceMap.put(page, relevance);
-        }
-    
-        // Преобразуем карты в результаты
-        return relevanceMap.entrySet().stream()
-                .map(entry -> {
-                    Page page = entry.getKey();
-                    double normalizedRelevance = entry.getValue() / maxRelevance;
-                    return new SearchResult(
-                            page.getSite().getUrl(),
-                            page.getSite().getName(),
-                            page.getPath(),
-                            page.getTitle(),
-                            generateSnippet(page.getContent(), lemmas),
-                            normalizedRelevance
-                    );
-                })
-                .collect(Collectors.toList());
-    }
-    
-    private double calculatePageRelevance(Page page, List<String> lemmas) {
-        return lemmas.stream()
-                .mapToDouble(lemma -> {
-                    try {
-                        return pageRepository.findLemmaRank(page.getId(), lemma);
-                    } catch (Exception e) {
-                        return 0.0; // Возвращаем 0.0 для отсутствующих данных
-                    }
-                })
-                .sum();
-    }
-    
-    
-
-    private String generateSnippet(String content, List<String> lemmas) {
-        String snippet = content;
-        for (String lemma : lemmas) {
-            snippet = snippet.replaceAll("(?i)" + lemma, "<b>" + lemma + "</b>");
-        }
-        return snippet.length() > 200 ? snippet.substring(0, 200) + "..." : snippet;
     }
 
-    private Site createNewSiteEntry(Site siteConfig) {
-        if (siteConfig == null) {
-            return null;
-        }
-
-        Site site = new Site();
-        site.setStatus(Status.INDEXING);
-        site.setUrl(siteConfig.getUrl());
-        site.setName(siteConfig.getName());
-        site.setStatusTime(new Timestamp(System.currentTimeMillis()));
-
-        Site savedSite = siteRepository.save(site);
-        logger.info("Сайт сохранен: {}", savedSite);
-        return savedSite;
-    }
-
-    private void updateSiteStatus(Site site, Status status) {
-        site.setStatus(status);
-        site.setStatusTime(new Timestamp(System.currentTimeMillis()));
-        siteRepository.save(site);
-    }
-
-    private void updateSiteLastError(Site site, String error) {
-        site.setLastError(error);
-        siteRepository.save(site);
-    }
-
-    public String cleanHtmlTags(String htmlContent) {
-        Document doc = Jsoup.parse(htmlContent);
-        return doc.text();
-    }
-    // Метод для расчета ранга леммы на странице
-private float calculateRank(String content, String lemma) {
-    // Логика для вычисления ранга, например, основанная на частоте встречаемости леммы на странице
-    int occurrences = countOccurrences(content, lemma);
-    return (float) occurrences;  // Пример: просто возвращаем количество вхождений леммы
-}// Метод для подсчета количества вхождений леммы в контент
-private int countOccurrences(String content, String lemma) {
-    int count = 0;
-    int index = 0;
-    while ((index = content.indexOf(lemma, index)) != -1) {
-        count++;
-        index += lemma.length();  // Пропускаем уже найденную лемму
-    }
-    return count;
-}
-public void processSitePages(Site site, String url) throws IOException {
-    // Проверяем входные параметры
-    if (site == null || url == null || url.isEmpty()) {
-        logger.error("Ошибка: site или URL не могут быть null или пустыми. site: {}, url: {}", site, url);
-        throw new IllegalArgumentException("Site или URL не могут быть null или пустыми.");
-    }
-
-    try {
-        // Загружаем страницу с помощью JSoup с тайм-аутом и проверкой статуса
-        Connection connection = Jsoup.connect(url).timeout(5000); // Устанавливаем тайм-аут
-        Document document = connection.get();
-        
-        int statusCode = document.connection().response().statusCode();
-        if (statusCode != 200) {
-            logger.warn("Получен нестандартный HTTP-статус для URL {}: {}", url, statusCode);
-            return; // Возвращаемся, если статус не 200
-        }
-
-        // Извлекаем основную информацию о странице
-        String title = document.title();
-        String content = document.body().text(); // Текстовое содержимое страницы
-
-        // Проверка на пустое содержимое
-        if (content.isEmpty()) {
-            logger.warn("Страница по URL {} не содержит текста.", url);
-            return;
-        }
-
-        // Создаем и сохраняем объект Page
-        Page page = new Page();
-        page.setSite(site);
-        page.setPath(url); // URL используется как путь страницы
-        page.setCode(statusCode); // HTTP-код ответа
-        page.setContent(content); // Сохраняем текстовое содержимое
-        Page savedPage = pageRepository.save(page);
-
-        // Обрабатываем леммы на странице
-        List<String> lemmas = extractLemmas(content); // Метод для извлечения лемм
-        for (String lemma : lemmas) {
-            processLemmaAndIndex(savedPage, lemma, content);
-        }
-
-    }catch (Exception e) {
-        // Логируем любую другую ошибку
-        logger.error("Неизвестная ошибка при обработке URL: {}. Сообщение об ошибке: {}", url, e.getMessage(), e);
-        throw new RuntimeException("Неизвестная ошибка при обработке URL: " + url, e);
-    }
-        // Логируем ошибку с деталями
-        
-}
-
-
-@Transactional
-private void processLemmaAndIndex(Page savedPage, String lemma, String content) {
-    logger.info("processLemmaAndIndex started for pageId: {}, lemma: {}", savedPage.getId(), lemma);
-    try {
-        // Проверяем, существует ли лемма в базе
-        Lemma lemmaEntity = lemmaRepository.findByLemmaText(lemma);
-        if (lemmaEntity == null) {
-            // Если лемма не найдена, создаём и сохраняем новую
-            lemmaEntity = new Lemma();
-            lemmaEntity.setLemmaText(lemma);
-            lemmaEntity.setSite(savedPage.getSite()); // Добавляем site
-            lemmaEntity.setFrequency(0); // Добавляем frequency
-            lemmaEntity = lemmaRepository.save(lemmaEntity); // Сохраняем и сразу получаем сохранённый объект
-            logger.info("Lemma saved: {}", lemmaEntity);
-        } else {
-            // Увеличиваем частоту, если лемма уже существует
-            lemmaEntity.setFrequency(lemmaEntity.getFrequency() + 1);
-            lemmaEntity = lemmaRepository.save(lemmaEntity);
-            logger.info("Lemma updated: {}", lemmaEntity);
-        }
-
-        // Проверяем, существует ли уже индекс с таким pageId и lemma
-        Index existingIndex = indexRepository.findByPageIdAndLemma(savedPage.getId(), lemma);
-
-        // Если индекс не найден, создаем новый
-        if (existingIndex == null) {
-            // Создаем индекс для страницы и леммы
-            Index index = new Index();
-            index.setPageId(savedPage.getId()); // Используем ID страницы
-            index.setLemma(lemmaEntity.getLemmaText()); // Используем текст леммы
-            index.setLemmaId(lemmaEntity.getId()); // Устанавливаем ID леммы - это ключевое исправление
-            index.setRank(calculateRank(content, lemma)); // Метод для расчета ранга
-            indexRepository.save(index);
-            logger.info("Index saved: {}", index);
-        } else {
-            // Если индекс найден, обновляем его (если нужно)
-            existingIndex.setRank(calculateRank(content, lemma));
-            // Убедимся, что lemmaId установлен
-            if (existingIndex.getLemmaId() == null) {
-                existingIndex.setLemmaId(lemmaEntity.getId());
-            }
-            indexRepository.save(existingIndex);
-            logger.info("Index updated: {}", existingIndex);
-        }
-    } catch (Exception e) {
-        logger.error("Error in processLemmaAndIndex for pageId: {}, lemma: {}", savedPage.getId(), lemma, e);
-        throw new RuntimeException("Error in processLemmaAndIndex", e);
-    }
-    logger.info("processLemmaAndIndex finished for pageId: {}, lemma: {}", savedPage.getId(), lemma);
-}
-
-
-
-
-/**
- * Обрабатывает список URL для указанного сайта.
- *
- * @param site объект сайта
- * @param urls список URL
- */
-public void processSitePages(Site site, List<String> urls) {
-    if (site == null || urls == null || urls.isEmpty()) {
-        throw new IllegalArgumentException("Site или список URL не могут быть null или пустыми.");
-    }
-
-    for (String url : urls) {
+    /**
+     * Индексирует конкретную страницу для указанного сайта.
+     * При ошибках выбрасывается исключение с подробным сообщением.
+     */
+    @Transactional
+    public void indexPage(String url, Site site) throws IOException {
+        logger.info("Начата индексизация страницы: {} для сайта: {}", url, site.getUrl());
         try {
-            processSitePages(site, url);
+            // Устанавливаем статус INDEXING перед индексированием страницы
+            siteService.updateSiteStatus(site, Status.INDEXING);
+            siteService.saveOrUpdateSite(site);
+
+            // Вызываем метод, который индексирует страницу
+            pageService.indexPage(url);
+
+            // По завершении обновляем статус на INDEXED
+            siteService.updateSiteStatus(site, Status.INDEXED);
+            siteService.saveOrUpdateSite(site);
+            logger.info("Страница успешно проиндексирована: {} для сайта: {}", url, site.getUrl());
+        } catch (SocketTimeoutException e) {
+            logger.error("Таймаут при подключении к странице {}: {}", url, e.toString(), e);
+            siteService.updateSiteStatus(site, Status.FAILED);
+            siteService.updateSiteLastError(site, "Таймаут подключения: " + e.getMessage());
+            siteService.saveOrUpdateSite(site);
+            throw new IOException("Таймаут подключения к странице " + url + ": " + e.getMessage(), e);
         } catch (IOException e) {
-            // Логируем ошибку, чтобы не прерывать обработку остальных URL
-            System.err.println("Ошибка обработки URL: " + url + " - " + e.getMessage());
+            logger.error("Ошибка ввода-вывода при индексировании страницы {}: {}", url, e.toString(), e);
+            siteService.updateSiteStatus(site, Status.FAILED);
+            siteService.updateSiteLastError(site, e.getMessage());
+            siteService.saveOrUpdateSite(site);
+            throw new IOException("Ошибка ввода-вывода при индексировании страницы " + url + ": " + e.getMessage(), e);
+        } catch (Exception e) {
+            logger.error("Неожиданная ошибка при индексировании страницы {}: {}", url, e.toString(), e);
+            siteService.updateSiteStatus(site, Status.FAILED);
+            siteService.updateSiteLastError(site, e.getMessage());
+            siteService.saveOrUpdateSite(site);
+            throw new IOException("Ошибка при обработке страницы " + url + ": " + e.getMessage(), e);
         }
     }
 }
 
-}

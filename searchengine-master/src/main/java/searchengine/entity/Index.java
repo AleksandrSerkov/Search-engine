@@ -1,4 +1,5 @@
 package searchengine.entity;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
@@ -6,17 +7,18 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
-
-
+/**
+ * Сущность для таблицы индексов (idx).
+ * Обратите внимание, что поле для ранга переименовано в "rank_value"
+ * чтобы избежать использования зарезервированного слова "rank" в MySQL.
+ */
 @Entity
 @Table(name = "idx")
 public class Index {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    @Column(name = "id", nullable = false, unique = true)
-
-
+    @Column(name = "id")
     private Integer id;
 
     @Column(name = "page_id", nullable = false)
@@ -28,8 +30,15 @@ public class Index {
     @Column(name = "lemma", nullable = false)
     private String lemma;
 
-    @Column(name = "level", nullable = false)
-    private Float rank;
+    @Column(name = "idx", nullable = false)
+    private Integer idx;
+    
+    // Переименовано поле rank в rank_value для избежания конфликтов с зарезервированными словами MySQL.
+    @Column(name = "rank_value")
+    private float rank;
+
+    // Геттеры и сеттеры
+
     public Integer getId() {
         return id;
     }
@@ -62,11 +71,21 @@ public class Index {
         this.lemma = lemma;
     }
 
-    public Float getRank() {
+    public Integer getIdx() {
+        return idx;
+    }
+
+    public void setIdx(Integer idx) {
+        this.idx = idx;
+    }
+    
+    // Геттер и сеттер для rank (ранга)
+    public float getRank() {
         return rank;
     }
 
-    public void setRank(Float rank) {
+    public void setRank(float rank) {
         this.rank = rank;
     }
 }
+

@@ -1,3 +1,4 @@
+
 package searchengine.dto.statistics;
 
 
@@ -22,4 +23,3 @@ public class StatisticsResponse {
         this.statistics = statistics;
     }
 }
-

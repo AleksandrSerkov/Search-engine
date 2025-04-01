@@ -15,21 +15,24 @@ import org.springframework.boot.autoconfigure.orm.jpa.JpaProperties;
 import org.springframework.boot.orm.jpa.EntityManagerFactoryBuilder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.EnableAspectJAutoProxy;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.orm.jpa.JpaTransactionManager;
 import org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean;
 import org.springframework.orm.jpa.vendor.HibernateJpaVendorAdapter;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.EnableTransactionManagement;
+
+import jakarta.persistence.EntityManagerFactory;
 
 
 @Configuration
 @EnableTransactionManagement
 @EntityScan(basePackages = "searchengine.entity")
 @EnableJpaRepositories(basePackages = "searchengine.repository")
-
+@EnableAspectJAutoProxy(proxyTargetClass = true)
 public class DatabaseConfig {
-
 
     @Bean
     public DataSource dataSource(DataSourceProperties dataSourceProperties) {
@@ -41,7 +44,8 @@ public class DatabaseConfig {
             EntityManagerFactoryBuilder builder,
             DataSource dataSource,
             JpaProperties jpaProperties) {
-        LocalContainerEntityManagerFactoryBean entityManagerFactoryBean = builder.dataSource(dataSource)
+        LocalContainerEntityManagerFactoryBean entityManagerFactoryBean = builder
+                .dataSource(dataSource)
                 .packages("searchengine.entity")
                 .properties(jpaProperties.getProperties())
                 .build();
@@ -53,25 +57,15 @@ public class DatabaseConfig {
     
         return entityManagerFactoryBean;
     }
-    
-    @Bean
-    public PlatformTransactionManager transactionManager(DataSource dataSource) {
-        return new DataSourceTransactionManager(dataSource);
-    }
 
     @Bean
-    public String message() {
-        return "data here";
+    public PlatformTransactionManager transactionManager(EntityManagerFactory entityManagerFactory) {
+        return new JpaTransactionManager(entityManagerFactory);
     }
 
-    @Bean
-    public searchengine.entity.Site site() {
-        return new searchengine.entity.Site();
-    }
-// Добавление конфигурации HttpClientConfig
+    // Бин для работы с JSoup (не связан с базой данных)
     @Bean
     public Connection jsoupConnection() throws Exception {
-        // Создаем SSLContext, который будет игнорировать все сертификаты
         SSLContext sslContext = SSLContext.getInstance("TLS");
         sslContext.init(null, new TrustManager[] { new X509TrustManager() {
             public X509Certificate[] getAcceptedIssuers() {
@@ -85,11 +79,9 @@ public class DatabaseConfig {
             }
         }}, new java.security.SecureRandom());
 
-        // Устанавливаем SSLContext и игнорируем hostname verification
         HttpsURLConnection.setDefaultSSLSocketFactory(sslContext.getSocketFactory());
         HttpsURLConnection.setDefaultHostnameVerifier((hostname, session) -> true);
 
-        // Возвращаем соединение Jsoup
         return Jsoup.newSession();
     }
 }

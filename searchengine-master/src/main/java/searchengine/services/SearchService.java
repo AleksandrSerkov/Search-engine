@@ -1,25 +1,31 @@
 package searchengine.services;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import searchengine.dto.statistics.SearchResultDTO;
 import searchengine.entity.Page;
 import searchengine.entity.Site;
-import searchengine.model.SearchResult;
 import searchengine.repository.LemmaRepository;
 import searchengine.repository.PageRepository;
 import searchengine.repository.SiteRepository;
 
 @Service
 public class SearchService {
+
+    private static final Logger logger = LoggerFactory.getLogger(SearchService.class);
+
+    private static final int DEFAULT_MIN_WORD_LENGTH = 3; // Возможность настройки минимальной длины слова
 
     private final LemmaRepository lemmaRepository;
     private final PageRepository pageRepository;
@@ -31,116 +37,167 @@ public class SearchService {
         this.siteRepository = siteRepository;
     }
 
-    public List<SearchResult> search(String query, String site, int offset, int limit) {
-        // Разбиение запроса на леммы
-        List<String> lemmas = extractLemmas(query);
-
-        if (lemmas.isEmpty()) {
-            return Collections.emptyList();
+    public List<SearchResultDTO> search(String query, String site, int offset, int limit) {
+        if (query == null || query.trim().isEmpty()) {
+            String message = "Поисковый запрос не может быть пустым.";
+            logger.warn(message);
+            throw new IllegalArgumentException(message);
         }
 
-        // Фильтрация страниц по леммам
+        List<String> lemmas = extractLemmas(query, DEFAULT_MIN_WORD_LENGTH);
+        if (lemmas.isEmpty()) {
+            String message = "Не найдено лемм для запроса: '" + query + "'";
+            logger.info(message);
+            throw new IllegalArgumentException(message);
+        }
+
+        if (site != null && !site.isEmpty()) {
+            Optional<Site> siteEntity = siteRepository.findByUrl(site);
+            if (siteEntity.isEmpty()) {
+                String message = "Сайт с URL '" + site + "' не проиндексирован.";
+                logger.info(message);
+                throw new IllegalArgumentException(message);
+            }
+        }
+
         List<Page> pages = filterPagesByLemmas(lemmas, site);
+        List<SearchResultDTO> results = calculateRelevance(pages, lemmas);
 
-        // Рассчитываем релевантность страниц
-        List<SearchResult> results = calculateRelevance(pages, lemmas);
+        if (results.isEmpty()) {
+            String message = "По вашему запросу ничего не найдено.";
+            logger.info(message);
+            return Collections.emptyList(); // Возвращаем пустой список, а не исключение
+        }
 
-        // Сортировка по релевантности и постраничный вывод
         return results.stream()
-                .sorted(Comparator.comparingDouble(SearchResult::getRelevance).reversed())
+                .sorted(Comparator.comparingDouble(SearchResultDTO::getRelevance).reversed())
                 .skip(offset)
                 .limit(limit)
                 .collect(Collectors.toList());
     }
 
-    public int countSearchResults(String query, String site) {
-        List<String> lemmas = extractLemmas(query);
-        if (lemmas.isEmpty()) {
-            return 0;
-        }
-
-        List<Page> pages = filterPagesByLemmas(lemmas, site);
-        return pages.size();
-    }
-
-    private List<String> extractLemmas(String query) {
-        // Реализуйте разбиение строки на леммы и исключение ненужных слов
-        // Пример: вызов метода лемматизации
-        return List.of(query.split("\\s+")).stream()
+    /**
+     * Метод для извлечения лемм из запроса с учетом минимальной длины слова.
+     * @param query          Исходный поисковый запрос.
+     * @param minWordLength  Минимальная длина слова для учета.
+     * @return Список уникальных лемм.
+     */
+    private List<String> extractLemmas(String query, int minWordLength) {
+        return Arrays.stream(query.toLowerCase().split("[,\\s]+"))
                 .map(this::lemmatizeWord)
-                .filter(Objects::nonNull)
+                .filter(word -> word.length() >= minWordLength) // Гибкая настройка длины
                 .distinct()
                 .collect(Collectors.toList());
     }
-
     private String lemmatizeWord(String word) {
-        // Реализуйте лемматизацию слова
-        return word.toLowerCase(); // Пример: приведение к нижнему регистру
+        return word.replaceAll("\\d", "").replaceAll("\\W", "");
     }
 
     private List<Page> filterPagesByLemmas(List<String> lemmas, String site) {
-        // Фильтрация страниц по леммам и сайту
+        List<Page> pages;
         if (site != null && !site.isEmpty()) {
             Optional<Site> siteEntity = siteRepository.findByUrl(site);
             if (siteEntity.isEmpty()) {
+                logger.info("Сайт '{}' не найден в базе.", site);
                 return Collections.emptyList();
             }
-            // Передаем siteId вместо объекта Site
-            return pageRepository.findPagesByLemmasAndSite(lemmas, siteEntity.get().getId());
+            pages = pageRepository.findPagesByLemmasAndSite(lemmas, siteEntity.get().getId());
         } else {
-            return pageRepository.findPagesByLemmas(lemmas);
+            pages = pageRepository.findPagesByLemmas(lemmas);
         }
-    }
-    
 
-    private List<SearchResult> calculateRelevance(List<Page> pages, List<String> lemmas) {
-        // Рассчитываем абсолютную релевантность страниц
+        // Фильтруем страницы: оставляем только те, где присутствуют ВСЕ леммы
+        return pages.stream()
+                .filter(page -> lemmas.stream().allMatch(lemma -> page.getContent().toLowerCase().contains(lemma)))
+                .collect(Collectors.toList());
+    }
+
+    private List<SearchResultDTO> calculateRelevance(List<Page> pages, List<String> lemmas) {
         Map<Page, Double> relevanceMap = new HashMap<>();
-    
-        for (Page page : pages) {
-            double relevance = calculatePageRelevance(page, lemmas);
-            relevanceMap.put(page, relevance);
+
+        for (Page p : pages) {
+            double relevance = calculatePageRelevance(p, lemmas);
+            relevanceMap.put(p, relevance);
         }
-    
-        // Вычисляем максимальную релевантность
-        double maxRelevance = relevanceMap.values().stream()
-                .max(Double::compare)
-                .orElse(1.0); // Защита от деления на 0
-    
-        // Преобразование в список SearchResult с нормализацией релевантности
+
+        double maxRelevance = relevanceMap.values().stream().max(Double::compare).orElse(1.0);
+
         return relevanceMap.entrySet().stream()
                 .map(entry -> {
-                    Page page = entry.getKey();
-                    double normalizedRelevance = entry.getValue() / maxRelevance;
-                    return new SearchResult(
-                            page.getSite().getUrl(),
-                            page.getSite().getName(),
-                            page.getPath(),
-                            page.getTitle(),
-                            generateSnippet(page.getContent(), lemmas),
-                            normalizedRelevance
+                    Page p = entry.getKey();
+                    String siteUrl = p.getSite().getUrl();
+                    String pagePath = p.getPath();
+                    String fullUrl = pagePath.startsWith("http") ? pagePath 
+                            : siteUrl + (pagePath.startsWith("/") ? "" : "/") + pagePath;
+                    String baseUrl = extractBaseUrl(fullUrl);
+                    String relativeUri = extractRelativeUrl(fullUrl);
+                    String fileName = extractFileName(fullUrl, siteUrl);
+
+                    logger.info("Создан результат: fileName={}, Title={}", fileName, p.getTitle());
+
+                    return new SearchResultDTO(
+                            baseUrl,
+                            relativeUri,
+                            p.getTitle(),
+                            generateSnippet(p.getContent(), lemmas),
+                            entry.getValue() / maxRelevance,
+                            p.getSite().getName(),
+                            fileName
                     );
                 })
                 .collect(Collectors.toList());
     }
-    
+
+    private String extractBaseUrl(String fullUrl) {
+        try {
+            java.net.URL url = new java.net.URL(fullUrl);
+            return url.getProtocol() + "://" + url.getHost();
+        } catch (Exception e) {
+            return fullUrl;
+        }
+    }
+
+    private String extractRelativeUrl(String fullUrl) {
+        try {
+            java.net.URL url = new java.net.URL(fullUrl);
+            String path = url.getPath();
+            return (path != null) ? path : "";
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    private String extractFileName(String fullUrl, String siteUrl) {
+        if (fullUrl == null || fullUrl.isEmpty()) return "";
+        int lastSlash = fullUrl.lastIndexOf('/');
+        String extracted = (lastSlash != -1 && lastSlash < fullUrl.length() - 1)
+                ? fullUrl.substring(lastSlash + 1)
+                : "";
+        return extracted.isEmpty() ? siteUrl.replaceFirst("^https?://", "") : extracted;
+    }
 
     private double calculatePageRelevance(Page page, List<String> lemmas) {
-        // Рассчитываем абсолютную релевантность страницы
+        String content = page.getContent().toLowerCase();
         return lemmas.stream()
-                .mapToDouble(lemma -> pageRepository.findLemmaRank(page.getId(), lemma))
+                .mapToDouble(lemma -> countOccurrences(content, lemma))
                 .sum();
     }
-    
-    
+
+    private int countOccurrences(String content, String lemma) {
+        int count = 0;
+        int index = 0;
+        while ((index = content.indexOf(lemma, index)) != -1) {
+            count++;
+            index += lemma.length();
+        }
+        return count;
+    }
 
     private String generateSnippet(String content, List<String> lemmas) {
-        // Создаем сниппет с выделением ключевых слов
-        String snippet = content;
         for (String lemma : lemmas) {
-            snippet = snippet.replaceAll("(?i)" + lemma, "<b>" + lemma + "</b>");
+            content = content.replaceAll("(?i)" + lemma, "<b>" + lemma + "</b>");
         }
-        return snippet.length() > 200 ? snippet.substring(0, 200) + "..." : snippet;
+        return content.length() > 200 ? content.substring(0, 200) + "..." : content;
     }
 }
 

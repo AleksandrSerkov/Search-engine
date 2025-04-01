@@ -7,15 +7,23 @@ public class SearchResult {
     private String title;
     private String snippet;
     private double relevance;
+    private String fileName; // Новое поле для имени файла
 
-    // Конструктор
-    public SearchResult(String site, String siteName, String uri, String title, String snippet, double relevance) {
+    // Конструктор с параметрами, включая fileName
+    public SearchResult(String site, String siteName, String uri, String title, String snippet, double relevance, String fileName) {
         this.site = site;
         this.siteName = siteName;
         this.uri = uri;
         this.title = title;
         this.snippet = snippet;
         this.relevance = relevance;
+        this.fileName = fileName;
+        System.out.println("SearchResult создан с fileName = " + this.fileName);
+    }
+    
+    // Перегруженный конструктор без fileName (по умолчанию fileName = "")
+    public SearchResult(String site, String siteName, String uri, String title, String snippet, double relevance) {
+        this(site, siteName, uri, title, snippet, relevance, "");
     }
 
     // Геттеры и сеттеры
@@ -66,6 +74,15 @@ public class SearchResult {
     public void setRelevance(double relevance) {
         this.relevance = relevance;
     }
+    
+    public String getFileName() {
+        return fileName;
+    }
+    
+    public void setFileName(String fileName) {
+        this.fileName = fileName;
+        System.out.println("setFileName вызван, значение fileName = " + this.fileName);
+    }
 
     @Override
     public String toString() {
@@ -76,6 +93,8 @@ public class SearchResult {
                 ", title='" + title + '\'' +
                 ", snippet='" + snippet + '\'' +
                 ", relevance=" + relevance +
+                ", fileName='" + fileName + '\'' +
                 '}';
     }
 }
+

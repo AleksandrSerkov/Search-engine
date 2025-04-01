@@ -1,8 +1,13 @@
 logging:
   level:
+    org.hibernate.engine.internal.StatisticalLoggingSessionEventListener: off
+    root: INFO
+    searchengine.init: DEBUG
     org.hibernate.SQL: debug
     org.hibernate.type.descriptor.sql.BasicBinder: trace
     org.springframework.boot: info
+    org.hibernate.transaction: debug
+    org.springframework.transaction: debug
   file:
     name: /home/norrak/Рабочий стол/logi/logfile.log
   loggers:
@@ -13,8 +18,9 @@ logging:
     org.springframework.boot:
       level: info
       appenders: [Console]
-
-
+    searchengine.init:
+      level: debug
+      appenders: [Console]
 
 indexing-settings:
   sites:
@@ -42,19 +48,33 @@ spring:
     url: jdbc:mysql://localhost:3306/search_engine
     driver-class-name: com.mysql.cj.jdbc.Driver
     hikari:
-      connection-timeout: 30000
+      connection-timeout: 0  # Отключаем тайм-аут соединения
       idle-timeout: 60000
       max-lifetime: 1800000
+
   jpa:
-    generate-ddl: false
+    hibernate:
+      ddl-auto: update
     show-sql: true
+    open-in-view: false
     properties:
       hibernate:
-        ddl-auto: update
-        dialect: org.hibernate.dialect.MySQL8Dialect
-        temp:
-          use_jdbc_metadata_defaults: false
+        dialect: org.hibernate.dialect.MySQLDialect
+        format_sql: true
+        generate_statistics: true
+        use_sql_comments: true
+        connection:
+          provider_disables_autocommit: false
+        jdbc:
+          batch_size: 100
+        order_inserts: true
+        order_updates: true
+        current_session_context_class: org.springframework.orm.hibernate5.SpringSessionContext
+        transaction:
+          jta:
+            platform: org.hibernate.engine.transaction.jta.platform.internal.NoJtaPlatform
 
-
-
+  transaction:
+    default-timeout: -1  # Убираем тайм-аут транзакции
+    rollback-on-commit-failure: true
 

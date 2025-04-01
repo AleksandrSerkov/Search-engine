@@ -1,0 +1,336 @@
+package searchengine.services;
+
+import java.io.IOException;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.stream.Collectors;
+
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
+import org.jsoup.nodes.Element;
+import org.jsoup.select.Elements;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.scheduling.annotation.Async;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
+
+import searchengine.config.SitesList;
+import searchengine.entity.Index;
+import searchengine.entity.Lemma;
+import searchengine.entity.Page;
+import searchengine.entity.Site;
+import searchengine.model.Status;
+import searchengine.repository.IndexRepository;
+import searchengine.repository.LemmaRepository;
+import searchengine.repository.PageRepository;
+import searchengine.repository.SiteRepository;
+
+@Service
+public class IndexingService {
+
+    private static final Logger logger = LoggerFactory.getLogger(IndexingService.class);
+
+    private final SiteRepository siteRepository;
+    private final PageRepository pageRepository;
+    private final LemmaRepository lemmaRepository;
+    private final IndexRepository indexRepository;
+    private final TransactionTemplate transactionTemplate;
+
+    // Бин для загрузки сайтов из YAML (например, application.yml)
+    @Autowired
+    private SitesList sitesList;
+
+    @Autowired
+    private SiteService siteService; // если используется в других местах
+
+    @Autowired
+    public IndexingService(SiteRepository siteRepository, 
+                           PageRepository pageRepository,
+                           LemmaRepository lemmaRepository, 
+                           IndexRepository indexRepository,
+                           PlatformTransactionManager transactionManager) {
+        this.siteRepository = siteRepository;
+        this.pageRepository = pageRepository;
+        this.lemmaRepository = lemmaRepository;
+        this.indexRepository = indexRepository;
+        this.transactionTemplate = new TransactionTemplate(transactionManager);
+    }
+
+    private boolean isIndexingInProgress = false;
+    private searchengine.entity.Site convertConfigSiteToEntity(searchengine.config.Site configSite) {
+        searchengine.entity.Site siteEntity = new searchengine.entity.Site();
+        siteEntity.setUrl(configSite.getUrl());
+        siteEntity.setName(configSite.getName());
+        // Установите и другие поля, если нужно
+        return siteEntity;
+    }
+
+    public void loadSitesFromConfig() {
+        List<searchengine.config.Site> configSites = sitesList.getSites();
+        
+        if (configSites == null || configSites.isEmpty()) {
+            System.out.println("Список сайтов в YAML пуст, загрузка пропущена.");
+            return;
+        }
+
+        for (searchengine.config.Site configSite : configSites) {
+            // Проверяем, существует ли сайт в базе данных
+            if (siteRepository.findByUrl(configSite.getUrl()).isEmpty()) {
+                Site siteEntity = new Site();
+                siteEntity.setUrl(configSite.getUrl());
+                siteEntity.setName(configSite.getName());
+                siteEntity.setStatus(Status.INDEXING);
+                siteEntity.setStatusTime(new Date());
+                siteRepository.save(siteEntity);  // Сохраняем сайт в БД
+                System.out.println("Добавлен сайт: " + configSite.getUrl());
+            } else {
+                System.out.println("Сайт уже существует: " + configSite.getUrl());
+            }
+        }
+    }
+
+    /**
+     * Основной метод для запуска индексации.
+     * Сначала берём список сайтов из YAML-конфигурации (через бин SitesList).
+     * Если список пуст, выбрасываем исключение с логированием.
+     * Затем синхронно сохраняем/обновляем сайты и запускаем их асинхронную обработку.
+     */
+    public CompletableFuture<Void> startIndexing() {
+        // Преобразуем список конфигурационных объектов сайтов в сущности для БД
+        List<searchengine.entity.Site> sites = sitesList.getSites().stream()
+                .map(this::convertConfigSiteToEntity)
+                .collect(Collectors.toList());
+        
+        if (sites == null || sites.isEmpty()) {
+            String errorMsg = "No sites found in configuration (YAML).";
+            logger.error(errorMsg);
+            throw new RuntimeException(errorMsg);
+        }
+        logger.info("Starting indexing process with {} sites", sites.size());
+    
+        // Сохраняем или обновляем сайты синхронно, чтобы гарантировать их наличие в БД
+        for (searchengine.entity.Site site : sites) {
+            try {
+                saveOrUpdateSite(site);
+            } catch (Exception e) {
+                logger.error("Error saving site {}: {}", site.getUrl(), e.getMessage());
+                throw new RuntimeException("Failed to save site: " + site.getUrl(), e);
+            }
+        }
+    
+        // Запускаем асинхронную обработку для каждого сайта
+        List<CompletableFuture<Void>> processFutures = sites.stream()
+                .map(this::processSiteAsync)
+                .collect(Collectors.toList());
+        return CompletableFuture.allOf(processFutures.toArray(new CompletableFuture[0]));
+    }
+    
+
+    /**
+     * Сохраняет или обновляет объект Site в базе данных.
+     */
+    @Transactional
+    public void saveOrUpdateSite(Site site) {
+        Optional<Site> existingSiteOptional = siteRepository.findByUrl(site.getUrl());
+        if (existingSiteOptional.isPresent()) {
+            // Если сайт существует, обновляем его данные
+            Site existingSite = existingSiteOptional.get();
+            existingSite.setStatus(site.getStatus());
+            existingSite.setStatusTime(new Date());
+            siteRepository.save(existingSite);
+        } else {
+            // Если сайт не найден, сохраняем новый
+            site.setStatus(Status.INDEXING);
+            site.setStatusTime(new Date());
+            siteRepository.save(site);
+        }
+    }
+
+    /**
+     * Асинхронно обрабатывает сайт.
+     */
+    @Async
+    @Transactional
+    public CompletableFuture<Void> processSiteAsync(Site site) {
+        try {
+            processSite(site);
+            return CompletableFuture.completedFuture(null);
+        } catch (IOException e) {
+            logger.error("Error processing site asynchronously: {}", site.getUrl(), e);
+            updateSiteStatus(site, Status.FAILED);
+            updateSiteLastError(site, "Error accessing site: " + e.getMessage());
+            return CompletableFuture.failedFuture(e);
+        } catch (Exception e) {
+            logger.error("Error processing site asynchronously: {}", site.getUrl(), e);
+            return CompletableFuture.failedFuture(e);
+        }
+    }
+
+    /**
+     * Обрабатывает сайт: загружает главную страницу, индексирует её и обновляет статус.
+     * Перед обработкой извлекает управляемый объект Site из БД.
+     */
+    @Transactional
+public void processSite(Site site) throws IOException {
+    try {
+        // Если у сайта уже есть идентификатор, значит он сохранён и, вероятно, находится в базе.
+        // Иначе пытаемся извлечь его из БД по URL.
+        Site managedSite = (site.getId() != null)
+                ? site
+                : siteRepository.findByUrl(site.getUrl())
+                        .orElseThrow(() -> new RuntimeException("Site not found: " + site.getUrl()));
+
+        Document doc = Jsoup.connect(managedSite.getUrl())
+                .timeout(10000)
+                .userAgent("Mozilla/5.0")
+                .get();
+
+        savePage(managedSite, managedSite.getUrl(), doc);
+
+        Elements links = doc.select("a[href]");
+        for (Element link : links) {
+            String href = link.absUrl("href");
+            if (isValidUrl(href, managedSite.getUrl())) {
+                try {
+                    processPage(managedSite, href);
+                } catch (IOException e) {
+                    logger.error("Error indexing page: {}", href, e);
+                }
+            }
+        }
+        updateSiteStatus(managedSite, Status.INDEXED);
+        logger.info("Successfully indexed site: {}", managedSite.getUrl());
+    } catch (Exception e) {
+        logger.error("Error processing site: {}", site.getUrl(), e);
+        updateSiteStatus(site, Status.FAILED);
+        updateSiteLastError(site, "Error processing site: " + e.getMessage());
+        throw e;
+    }
+}
+
+
+    /**
+     * Загружает и обрабатывает страницу по заданному URL.
+     */
+    @Transactional
+    public void processPage(Site site, String url) throws IOException {
+        Document doc = Jsoup.connect(url)
+                .timeout(10000)
+                .userAgent("Mozilla/5.0")
+                .get();
+        savePage(site, url, doc);
+    }
+
+    /**
+     * Сохраняет страницу и запускает обработку лемм.
+     * Если объект Site ещё не сохранён, сохраняет его перед сохранением страницы.
+     */
+    @Transactional
+    public void savePage(Site site, String url, Document doc) {
+        if (site.getId() == null) {
+            siteRepository.save(site);
+        }
+        Page page = new Page();
+        page.setPath(url);
+        page.setContent(doc.html());
+        page.setSite(site);
+        page.setTitle(doc.title());
+        page.setCode(200);
+        pageRepository.save(page);
+        processLemmas(page);
+    }
+
+    /**
+     * Обрабатывает леммы из содержимого страницы и сохраняет индексацию.
+     */
+    @Transactional
+    public void processLemmas(Page page) {
+        String text = cleanHtmlTags(page.getContent());
+        String[] words = text.split("\\W+");
+
+        Map<String, Integer> lemmaCount = new HashMap<>();
+        for (String word : words) {
+            if (!word.isEmpty()) {
+                String lemma = word.toLowerCase();
+                lemmaCount.put(lemma, lemmaCount.getOrDefault(lemma, 0) + 1);
+            }
+        }
+
+        for (Map.Entry<String, Integer> entry : lemmaCount.entrySet()) {
+            String lemmaText = entry.getKey();
+            int rank = entry.getValue();
+
+            Lemma lemmaEntity = lemmaRepository.findByLemmaText(lemmaText);
+            if (lemmaEntity == null) {
+                lemmaEntity = new Lemma();
+                lemmaEntity.setLemmaText(lemmaText);
+                lemmaEntity.setSite(page.getSite());
+                lemmaEntity.setFrequency(1);
+            } else {
+                lemmaEntity.setFrequency(lemmaEntity.getFrequency() + 1);
+            }
+            lemmaRepository.save(lemmaEntity);
+
+            Index indexEntity = new Index();
+            indexEntity.setPageId(page.getId());
+            indexEntity.setLemmaId(lemmaEntity.getId());
+            indexEntity.setLemma(lemmaText);
+            indexEntity.setIdx(rank);
+            indexRepository.save(indexEntity);
+        }
+    }
+
+    /**
+     * Обновляет статус сайта.
+     */
+    @Transactional
+    public void updateSiteStatus(Site site, Status status) {
+        site.setStatus(status);
+        site.setStatusTime(new Date());
+        siteRepository.save(site);
+    }
+
+    /**
+     * Обновляет поле ошибки для сайта.
+     */
+    public void updateSiteLastError(Site site, String error) {
+        site.setLastError(error);
+        siteRepository.save(site);
+    }
+
+    /**
+     * Проверяет, что URL начинается с базового URL и не содержит нежелательных символов.
+     */
+    private boolean isValidUrl(String url, String baseUrl) {
+        return url.startsWith(baseUrl) && !url.contains("#") && !url.contains("?");
+    }
+
+    /**
+     * Удаляет HTML-теги из строки.
+     */
+    private String cleanHtmlTags(String html) {
+        return html.replaceAll("<[^>]*>", " ");
+    }
+
+    /**
+     * Метод для индексации страницы по URL.
+     */
+    @Transactional
+    public void indexPage(String url, Site site) throws IOException {
+        try {
+            processPage(site, url);
+        } catch (IOException e) {
+            logger.error("Error indexing page: {}", url, e);
+            throw e;
+        }
+    }
+}
+

@@ -36,11 +36,11 @@ public class StatisticsServiceImpl implements StatisticsService {
         };
 
         TotalStatistics total = new TotalStatistics();
-        List<Site> sitesList = sites.getSites();
-        System.out.println("Sites list size: " + sitesList.size()); // Логирование размера списка
+        List<Site> configSites = sites.getSites();
+        System.out.println("Sites list size: " + configSites.size()); // Логирование размера списка
 
         // Проверка на пустой список и вывод значения в консоль
-        boolean isSiteListEmpty = sitesList.isEmpty();
+        boolean isSiteListEmpty = configSites.isEmpty();
         System.out.println("Is sites list empty? " + isSiteListEmpty);
 
         if (isSiteListEmpty) {
@@ -63,12 +63,12 @@ public class StatisticsServiceImpl implements StatisticsService {
         System.out.println("Processing sites list...");
 
         // Если список не пустой, выполняем основную логику
-        total.setSites(sitesList.size());
+        total.setSites(configSites.size());
         total.setIndexing(true);
 
         List<DetailedStatisticsItem> detailed = new ArrayList<>();
-        for (int i = 0; i < sitesList.size(); i++) {
-            Site site = sitesList.get(i);
+        for (int i = 0; i < configSites.size(); i++) {
+            Site site = configSites.get(i);
             DetailedStatisticsItem item = new DetailedStatisticsItem();
             item.setName(site.getName());
             item.setUrl(site.getUrl());
